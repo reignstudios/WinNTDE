@@ -23,12 +23,14 @@ namespace WinNTDE
         private ImageSource icon;
         private bool iconRequested;
 
-        internal FileEntry(FileSystemInfo info, bool thumbnails)
+        internal FileEntry(FileSystemInfo info, bool thumbnails, bool details)
         {
             Path = info.FullName;
             IsFolder = info is DirectoryInfo;
             Name = info.Extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) && !IsFolder
                 ? System.IO.Path.GetFileNameWithoutExtension(info.Name) : info.Name;
+            this.thumbnails = thumbnails;
+            if (!details) return;
             Kind = IsFolder ? "Folder" : string.IsNullOrEmpty(info.Extension) ? "File" :
                 info.Extension.Substring(1).ToUpperInvariant() + " file";
             try
@@ -38,7 +40,16 @@ namespace WinNTDE
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
-            this.thumbnails = thumbnails;
+        }
+
+        internal FileEntry(string name, string path, bool isFolder, string kind = null, string modified = null, string size = null)
+        {
+            Name = name;
+            Path = path;
+            IsFolder = isFolder;
+            Kind = kind;
+            Modified = modified;
+            Size = size;
         }
 
         public string Name { get; private set; }
@@ -121,11 +132,11 @@ namespace WinNTDE
         private static extern int SHFileOperation(ref FileOperation operation);
         [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
 
-        internal static IEnumerable<FileEntry> ReadFolder(string path, bool thumbnails)
+        internal static IEnumerable<FileEntry> ReadFolder(string path, bool thumbnails, bool details = false)
         {
             return new DirectoryInfo(path).EnumerateFileSystemInfos()
                 .Where(info => (info.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0)
-                .Select(info => new FileEntry(info, thumbnails));
+                .Select(info => new FileEntry(info, thumbnails, details));
         }
 
         internal static ImageSource FileIcon(string path, bool isFolder)
@@ -275,6 +286,25 @@ namespace WinNTDE
                 Destination = destination + "\0\0",
                 Flags = (ushort)(sameFolder ? 8 : 0)
             };
+            return RunFileOperation(ref operation);
+        }
+
+        internal static void Delete(Window owner, string[] paths, bool recycle = false)
+        {
+            if (paths.Length == 0) return;
+            const ushort NoConfirmation = 0x10, AllowUndo = 0x40, WarnIfPermanent = 0x4000;
+            var operation = new FileOperation
+            {
+                Owner = new System.Windows.Interop.WindowInteropHelper(owner).Handle,
+                Operation = 3,
+                Source = string.Join("\0", paths.Select(Path.GetFullPath)) + "\0\0",
+                Flags = recycle ? (ushort)(NoConfirmation | AllowUndo | WarnIfPermanent) : NoConfirmation
+            };
+            RunFileOperation(ref operation);
+        }
+
+        private static bool RunFileOperation(ref FileOperation operation)
+        {
             int result = SHFileOperation(ref operation);
             if (result != 0 && !operation.Aborted)
                 throw new IOException("Windows could not complete the file operation (0x" + result.ToString("X") + ").");

@@ -24,11 +24,15 @@
 
 # WinNTDE File Explorer Window
 - File-Explorer is a WPF Window
-- Feature: copy/paste/cut
+- Feature: copy/paste/cut/delete
+- Feature: Del key moves item to trash after asking user with popup whos owner is that File Explorer Window centered on it
+- Feature: Shift+Del will permanatly delete file after asking user
+- Feature: hitting a alpha-numeric key selects a item starting with that character
 - Feature: folders/files viewing and navigation
 - Feature: Windows user folders to the left
-- Feature: view options, optional thumnails with .png, .jpg, .ppm support ect
+- Feature: view options, optional thumnails with .png, .jpg, .ppm support ect (default is view without details or thumnails)
 - Feature: Loads 3rd party context menus in right-click
+- Feature: Button to get to RecycleBin and button empty it if you're in that location
 
 # WinNTDE Settings Window
 - Settings is a WPF Window

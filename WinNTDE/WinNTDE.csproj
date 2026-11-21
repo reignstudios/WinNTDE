@@ -81,6 +81,7 @@
     <Compile Include="ExplorerWindow.cs" />
     <Compile Include="NativeDesktop.cs" />
     <Compile Include="NotificationArea.cs" />
+    <Compile Include="RecycleBin.cs" />
     <Compile Include="RemovableMedia.cs" />
     <Compile Include="SettingsWindow.cs" />
     <Compile Include="ShellFileMenu.cs" />

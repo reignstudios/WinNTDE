@@ -22,7 +22,6 @@ namespace WinNTDE
 
         internal ShellPreferences()
         {
-            Details = true;
             try
             {
                 if (!File.Exists(file)) return;
@@ -32,7 +31,7 @@ namespace WinNTDE
                 AlignLeft = ReadBool(values, "AlignLeft", false);
                 AutoHide = ReadBool(values, "AutoHide", false);
                 Thumbnails = ReadBool(values, "Thumbnails", false);
-                Details = ReadBool(values, "Details", true);
+                Details = ReadBool(values, "Details", false);
                 var pins = values.Element("PinnedApps");
                 if (pins != null) PinnedApps = pins.Elements("App").Select(app => app.Value)
                     .Where(key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
