@@ -17,6 +17,7 @@ namespace WinNTDE
         internal static readonly IntPtr Topmost = new IntPtr(-1);
         internal static readonly IntPtr NotTopmost = new IntPtr(-2);
         internal static readonly int ProcessId = System.Diagnostics.Process.GetCurrentProcess().Id;
+        private static readonly bool SupportsCaptionColors = Environment.OSVersion.Version >= new Version(10, 0, 22000);
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Rect
@@ -68,6 +69,7 @@ namespace WinNTDE
         [DllImport("user32.dll")] private static extern IntPtr CopyIcon(IntPtr icon);
         [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr resource);
         [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
+        [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
 
         internal static Rect Screen { get { return new Rect { Right = GetSystemMetrics(0), Bottom = GetSystemMetrics(1) }; } }
 
@@ -176,10 +178,33 @@ namespace WinNTDE
         internal static void ThemeWindow(Window window)
         {
             window.SetResourceReference(FrameworkElement.StyleProperty, "ShellWindow");
+            window.SourceInitialized += (s, e) => UpdateTitleBar(window, ((App)Application.Current).Preferences.LightTheme);
             Rect work = WorkArea;
             window.MaxWidth = work.Width / ChromeScale;
             window.MaxHeight = work.Height / ChromeScale;
             window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        internal static void UpdateTitleBar(Window window, bool light)
+        {
+            if (!SupportsCaptionColors || window.WindowStyle == WindowStyle.None) return;
+            IntPtr hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero) return;
+
+            const int ImmersiveDarkMode = 20, CaptionColor = 35, TextColor = 36;
+            const uint DefaultColor = 0xFFFFFFFF;
+            uint dark = light ? 0u : 1u;
+            uint caption = light ? DefaultColor : ToColorRef((SolidColorBrush)window.FindResource("Surface"));
+            uint text = light ? DefaultColor : ToColorRef((SolidColorBrush)window.FindResource("Text"));
+            DwmSetWindowAttribute(hwnd, ImmersiveDarkMode, ref dark, sizeof(uint));
+            DwmSetWindowAttribute(hwnd, CaptionColor, ref caption, sizeof(uint));
+            DwmSetWindowAttribute(hwnd, TextColor, ref text, sizeof(uint));
+        }
+
+        private static uint ToColorRef(SolidColorBrush brush)
+        {
+            Color color = brush.Color;
+            return (uint)(color.R | (color.G << 8) | (color.B << 16));
         }
 
         internal static double ChromeScale

@@ -13,7 +13,14 @@
 - Task bar is a WPF Window that overlays other non-fullscreen Windows
 - Feature: Win11 like just showing app icon
 - Feature: Time shows in right corner
-- Feature: Tray icons show in popup like Win11 taskbar
+- Feature: Tray icons show in popup like Win11 taskbar showing app tray icons
+- Feature: Removable media has its own icon to pop up a list so you can eject media
+
+# WinNTDE Star Menu
+- Start Menu is a WPF Window that overlays other non-fullscreen Windows
+- Feature: Pinned app icons similar to Win11
+- Feature: App search bar to search apps by name
+- Feature: Button to view a list of all apps
 
 # WinNTDE File Explorer Window
 - File-Explorer is a WPF Window

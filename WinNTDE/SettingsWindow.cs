@@ -48,9 +48,7 @@ namespace WinNTDE
             sidebar.Children.Add(title);
             pages.Margin = new Thickness(7, 0, 7, 8);
             pages.Background = Brushes.Transparent;
-            var items = new Style(typeof(ListBoxItem));
-            items.Setters.Add(new Setter(PaddingProperty, new Thickness(8, 7, 8, 7)));
-            pages.ItemContainerStyle = items;
+            pages.SetResourceReference(ItemsControl.ItemContainerStyleProperty, "SettingsNavItem");
             pages.ItemsSource = Pages;
             pages.SelectionChanged += (s, e) => ShowPage(pages.SelectedItem as string);
             sidebar.Children.Add(pages);

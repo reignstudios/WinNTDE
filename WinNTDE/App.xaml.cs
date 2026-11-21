@@ -11,6 +11,7 @@ namespace WinNTDE
         private Mutex instance;
         private bool ownsInstance;
         private SettingsWindow settings;
+        private ResourceDictionary darkControls;
 
         internal ShellPreferences Preferences { get; private set; }
         internal bool IsShell { get; private set; }
@@ -48,6 +49,23 @@ namespace WinNTDE
             SetBrush("Line", light ? "#C9D2CF" : "#465157");
             SetBrush("Text", light ? "#1C2928" : "#F1F5F4");
             SetBrush("Muted", light ? "#506561" : "#B1C0BD");
+
+            if (light)
+            {
+                if (darkControls != null) Resources.MergedDictionaries.Remove(darkControls);
+                Resources["ShellMenu"] = Resources["ShellMenuLight"];
+                Resources["SettingsNavItem"] = Resources["SettingsNavItemLight"];
+            }
+            else
+            {
+                if (darkControls == null)
+                    darkControls = new ResourceDictionary { Source = new Uri("/WinNTDE;component/DarkControls.xaml", UriKind.Relative) };
+                if (!Resources.MergedDictionaries.Contains(darkControls)) Resources.MergedDictionaries.Add(darkControls);
+                Resources["ShellMenu"] = darkControls["ShellMenuDark"];
+                Resources["SettingsNavItem"] = darkControls["SettingsNavItemDark"];
+            }
+
+            foreach (Window window in Windows) NativeDesktop.UpdateTitleBar(window, light);
         }
 
         private void SetBrush(string name, string color)
