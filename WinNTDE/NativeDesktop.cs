@@ -37,6 +37,7 @@ namespace WinNTDE
 
         [DllImport("user32.dll")] internal static extern bool EnumWindows(EnumWindow callback, IntPtr data);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr FindWindow(string className, string title);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
         [DllImport("user32.dll")] internal static extern IntPtr GetShellWindow();
         [DllImport("user32.dll")] private static extern bool SetShellWindow(IntPtr hwnd);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
@@ -62,7 +63,7 @@ namespace WinNTDE
         [DllImport("user32.dll", EntryPoint = "GetClassLongW")] private static extern uint GetClassLong32(IntPtr hwnd, int index);
         [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] private static extern IntPtr GetClassLong64(IntPtr hwnd, int index);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int size);
-        [DllImport("user32.dll")] private static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam,
+        [DllImport("user32.dll")] internal static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam,
             uint flags, uint timeout, out IntPtr result);
         [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint action, uint value, ref Rect rect, uint flags);
         [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);

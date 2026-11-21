@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -23,8 +25,10 @@ namespace WinNTDE
         private readonly ScrollViewer taskScroll;
         private readonly StackPanel right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         private readonly StackPanel trayIcons = new StackPanel { Orientation = Orientation.Vertical };
+        private readonly StackPanel mediaItems = new StackPanel();
+        private readonly TextBlock mediaStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
         private readonly Button clock, trayButton;
-        private readonly Popup tray;
+        private readonly Popup tray, mediaPopup;
         private readonly DispatcherTimer taskRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         private readonly DispatcherTimer edgeRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(150) };
         private readonly Dictionary<IntPtr, TaskItem> windows = new Dictionary<IntPtr, TaskItem>();
@@ -32,7 +36,7 @@ namespace WinNTDE
         private ContextMenu openMenu;
         private NativeDesktop.Rect previousWork, lastScreen, bounds;
         private IntPtr hwnd, desktop, activeApp;
-        private bool fullscreen, collapsed, workAreaChanged, trayRegistrationFailed;
+        private bool fullscreen, collapsed, workAreaChanged, trayRefreshPending, mediaBusy, mediaRefreshPending, closed;
         private DateTime edgeSeen, mouseInside;
 
         internal TaskbarWindow(App app)
@@ -71,27 +75,34 @@ namespace WinNTDE
             right.VerticalAlignment = VerticalAlignment.Center;
             bar.Children.Add(right);
             trayButton = IconButton("⌃", "Notification area");
-            trayButton.Click += (s, e) => { RebuildTray(); tray.IsOpen = !tray.IsOpen; };
+            trayButton.Click += (s, e) =>
+            {
+                mediaPopup.IsOpen = false;
+                if (!tray.IsOpen) RebuildTray();
+                tray.IsOpen = !tray.IsOpen;
+            };
             right.Children.Add(trayButton);
+            var ejectIcon = new System.Windows.Shapes.Path { Data = Geometry.Parse("M 2,11 L 10,2 18,11 Z M 2,14 H 18 V 17 H 2 Z"),
+                Width = 18, Height = 18, Stretch = Stretch.Uniform };
+            ejectIcon.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "Text");
+            var mediaButton = IconButton(ejectIcon, "Eject removable media");
+            mediaButton.Click += (s, e) =>
+            {
+                tray.IsOpen = false;
+                mediaPopup.IsOpen = !mediaPopup.IsOpen;
+                if (mediaPopup.IsOpen) RefreshMedia();
+            };
+            right.Children.Add(mediaButton);
             clock = new Button { Margin = new Thickness(4, 0, 0, 0), MinWidth = 65, Padding = new Thickness(8, 3, 8, 3) };
             clock.Click += (s, e) => OpenClock();
             right.Children.Add(clock);
 
-            var trayContents = new StackPanel { Margin = new Thickness(9) };
-            trayContents.Children.Add(trayIcons);
-            var shortcuts = new UniformGrid { Columns = 3, Margin = new Thickness(0, 6, 0, 0) };
-            foreach (var page in new[] { "Wi-Fi", "Audio", "Power" })
-            {
-                var button = new Button { Content = page, Margin = new Thickness(2) };
-                button.Click += (s, e) => { tray.IsOpen = false; app.OpenSettings(page); };
-                shortcuts.Children.Add(button);
-            }
-            trayContents.Children.Add(shortcuts);
-            var trayBorder = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Child = trayContents };
-            trayBorder.SetResourceReference(Border.BackgroundProperty, "Panel");
-            trayBorder.SetResourceReference(Border.BorderBrushProperty, "Line");
-            tray = new Popup { PlacementTarget = trayButton, Placement = PlacementMode.Top, StaysOpen = false,
-                VerticalOffset = -7, Child = trayBorder };
+            tray = CreatePopup(trayButton, trayIcons);
+            var mediaPanel = new StackPanel { MinWidth = 210, MaxWidth = 380 };
+            mediaPanel.Children.Add(mediaStatus);
+            mediaPanel.Children.Add(new ScrollViewer { MaxHeight = 245, Content = mediaItems,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+            mediaPopup = CreatePopup(mediaButton, mediaPanel);
 
             var barMenu = App.Menu();
             App.AddMenuItem(barMenu, "Taskbar settings", () => app.OpenSettings("Taskbar"));
@@ -104,6 +115,8 @@ namespace WinNTDE
             right.SizeChanged += (s, e) => SizeTasks();
             Closed += (s, e) =>
             {
+                closed = true;
+                tray.IsOpen = mediaPopup.IsOpen = false;
                 taskRefresh.Stop();
                 edgeRefresh.Stop();
                 app.Preferences.Changed -= PreferencesChanged;
@@ -125,18 +138,12 @@ namespace WinNTDE
             HwndSource.FromHwnd(hwnd).AddHook(HandleMessage);
             previousWork = NativeDesktop.WorkArea;
             lastScreen = NativeDesktop.Screen;
-            if (app.IsShell)
+            try
             {
-                try
-                {
-                    notifications = new NotificationArea(() => bounds, () => app.Preferences.AutoHide);
-                    notifications.Changed += (s, args) =>
-                    {
-                        if (tray.IsOpen) Dispatcher.BeginInvoke(new Action(RebuildTray));
-                    };
-                }
-                catch (Win32Exception) { trayRegistrationFailed = true; }
+                notifications = new NotificationArea(() => bounds, () => app.Preferences.AutoHide, !app.IsShell);
+                notifications.Changed += OnTrayChanged;
             }
+            catch (Win32Exception) { }
             mouseInside = DateTime.UtcNow;
             ApplyPosition(true);
             RefreshTasks();
@@ -148,6 +155,12 @@ namespace WinNTDE
         {
             if (message == NativeDesktop.DisplayChanged || message == 0x02E0)
                 Dispatcher.BeginInvoke(new Action(() => ApplyPosition(true)));
+            if (message == 0x0219 && mediaPopup.IsOpen) // WM_DEVICECHANGE
+            {
+                int change = wParam.ToInt32();
+                if (change == 7 || change == 0x8000 || change == 0x8004)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => RefreshMedia()));
+            }
             if (message == 0x0021)
             {
                 handled = true;
@@ -215,7 +228,7 @@ namespace WinNTDE
             if (nowFullscreen != fullscreen)
             {
                 fullscreen = nowFullscreen;
-                if (fullscreen) tray.IsOpen = false;
+                if (fullscreen) tray.IsOpen = mediaPopup.IsOpen = false;
                 ApplyPosition(false);
             }
             if (!app.Preferences.AutoHide || fullscreen) return;
@@ -224,7 +237,7 @@ namespace WinNTDE
             DateTime now = DateTime.UtcNow;
             bool overEdge = cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Bottom - 2 && cursor.Y < bounds.Bottom;
             bool overBar = cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Top && cursor.Y < bounds.Bottom;
-            if (!collapsed && (overBar || tray.IsOpen || (openMenu != null && openMenu.IsOpen) || ContextMenu.IsOpen)) mouseInside = now;
+            if (!collapsed && (overBar || tray.IsOpen || mediaPopup.IsOpen || (openMenu != null && openMenu.IsOpen) || ContextMenu.IsOpen)) mouseInside = now;
             if (!overEdge) edgeSeen = DateTime.MinValue;
             else if (edgeSeen == DateTime.MinValue) edgeSeen = now;
             if (collapsed && overEdge && now - edgeSeen > TimeSpan.FromMilliseconds(140))
@@ -249,7 +262,7 @@ namespace WinNTDE
                 clock.Content = time;
                 clock.ToolTip = now.ToLongDateString();
             }
-            if (notifications != null) notifications.RemoveClosedWindows();
+            if (notifications != null) notifications.Refresh();
             IntPtr current = NativeDesktop.GetForegroundWindow();
             if (current == hwnd) current = activeApp;
             else if (current != IntPtr.Zero) activeApp = current;
@@ -325,9 +338,8 @@ namespace WinNTDE
             var icons = notifications == null ? null : notifications.VisibleIcons.ToArray();
             if (icons == null || icons.Length == 0)
             {
-                trayIcons.Children.Add(new TextBlock { Margin = new Thickness(4), Text = trayRegistrationFailed ?
-                    "The notification area is unavailable." : !app.IsShell ? "Windows Explorer is hosting notification icons." :
-                    "No notification icons." });
+                trayIcons.Children.Add(new TextBlock { Text = notifications == null ?
+                    "The notification area is unavailable." : "No app notification icons." });
                 return;
             }
             var grid = new UniformGrid { Columns = 5 };
@@ -342,6 +354,93 @@ namespace WinNTDE
                 grid.Children.Add(button);
             }
             trayIcons.Children.Add(new ScrollViewer { MaxHeight = 245, Content = grid, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        }
+
+        private void OnTrayChanged(object sender, EventArgs e)
+        {
+            if (!tray.IsOpen || trayRefreshPending) return;
+            trayRefreshPending = true;
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                trayRefreshPending = false;
+                if (tray.IsOpen) RebuildTray();
+            }));
+        }
+
+        private static Popup CreatePopup(Button target, FrameworkElement content)
+        {
+            var border = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8), Child = content };
+            border.SetResourceReference(Border.BackgroundProperty, "Panel");
+            border.SetResourceReference(Border.BorderBrushProperty, "Line");
+            border.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "Text");
+            return new Popup { PlacementTarget = target, Placement = PlacementMode.Top, StaysOpen = false,
+                VerticalOffset = -7, Child = border };
+        }
+
+        private void RefreshMedia(RemovableMedia.Device eject = null, string notice = null)
+        {
+            if (closed || !mediaPopup.IsOpen) return;
+            if (mediaBusy)
+            {
+                mediaRefreshPending = true;
+                return;
+            }
+            mediaBusy = true;
+            mediaItems.IsEnabled = false;
+            SetMediaStatus(eject == null ? notice ?? "Looking for removable media…" : "Ejecting " + eject.Name + "…");
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                bool ejected = false;
+                if (eject != null)
+                {
+                    notice = MediaError(() => RemovableMedia.Eject(eject));
+                    ejected = notice == null;
+                    if (ejected) notice = eject.OpticalDrive == null ? "Safe to remove " + eject.Name + "." : "Ejected " + eject.Name + ".";
+                }
+                RemovableMedia.Device[] devices = null;
+                string scanError = MediaError(() => devices = RemovableMedia.ListDevices());
+                if (ejected && devices != null) devices = devices.Where(device => !eject.Matches(device)).ToArray();
+                if (Dispatcher.HasShutdownStarted) return;
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    mediaBusy = false;
+                    bool refresh = mediaRefreshPending;
+                    mediaRefreshPending = false;
+                    if (closed || !mediaPopup.IsOpen) return;
+                    mediaItems.IsEnabled = true;
+                    mediaItems.Children.Clear();
+                    if (devices != null)
+                    {
+                        foreach (var device in devices)
+                        {
+                            var item = new Button { Content = new TextBlock { Text = "Eject " + device.Name, TextWrapping = TextWrapping.Wrap },
+                                Margin = new Thickness(0, 3, 0, 0) };
+                            System.Windows.Automation.AutomationProperties.SetName(item, "Eject " + device.Name);
+                            item.Click += (s, e) => RefreshMedia(device);
+                            mediaItems.Children.Add(item);
+                        }
+                    }
+                    SetMediaStatus(notice ?? scanError ?? (mediaItems.Children.Count == 0 ? "No removable media connected." : null));
+                    if (refresh) RefreshMedia(notice: notice);
+                }));
+            });
+        }
+
+        private void SetMediaStatus(string text)
+        {
+            mediaStatus.Text = text;
+            mediaStatus.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        private static string MediaError(Action work)
+        {
+            try { work(); return null; }
+            catch (Exception error) when (error is Win32Exception || error is IOException || error is InvalidOperationException ||
+                error is UnauthorizedAccessException || error is System.Security.SecurityException)
+            {
+                return error.Message;
+            }
         }
 
         private void OpenLauncher(Button button)
@@ -366,6 +465,7 @@ namespace WinNTDE
 
         private void OpenMenu(ContextMenu menu, Button button)
         {
+            tray.IsOpen = mediaPopup.IsOpen = false;
             openMenu = menu;
             menu.Closed += (s, e) => { if (openMenu == menu) openMenu = null; };
             menu.PlacementTarget = button;

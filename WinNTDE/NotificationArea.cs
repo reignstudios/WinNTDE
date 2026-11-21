@@ -10,19 +10,23 @@ namespace WinNTDE
     internal sealed class NotificationArea : IDisposable
     {
         private const string ClassName = "Shell_TrayWnd";
+        private const uint CopyDataMessage = 0x004A;
+        private static readonly uint TaskbarCreated = NativeDesktop.RegisterWindowMessage("TaskbarCreated");
         private readonly List<TrayIcon> icons = new List<TrayIcon>();
         private readonly WindowProcedure procedure;
         private readonly IntPtr instance = GetModuleHandle(null);
         private readonly Func<NativeDesktop.Rect> bounds;
         private readonly Func<bool> autoHide;
-        private IntPtr hwnd;
+        private readonly bool forwardToExplorer;
+        private IntPtr hwnd, explorer;
         private bool registered;
         internal event EventHandler Changed;
 
-        internal NotificationArea(Func<NativeDesktop.Rect> bounds, Func<bool> autoHide)
+        internal NotificationArea(Func<NativeDesktop.Rect> bounds, Func<bool> autoHide, bool forwardToExplorer)
         {
             this.bounds = bounds;
             this.autoHide = autoHide;
+            this.forwardToExplorer = forwardToExplorer;
             procedure = HandleMessage;
             var windowClass = new WindowClass { Procedure = procedure, Instance = instance, Name = ClassName };
             registered = RegisterClass(ref windowClass) != 0;
@@ -34,8 +38,8 @@ namespace WinNTDE
                 Dispose();
                 throw new Win32Exception(error);
             }
-            NativeDesktop.SendNotifyMessage(NativeDesktop.Broadcast, NativeDesktop.RegisterWindowMessage("TaskbarCreated"),
-                IntPtr.Zero, IntPtr.Zero);
+            if (forwardToExplorer) UpdateReceiver();
+            AnnounceTaskbar();
         }
 
         internal IEnumerable<TrayIcon> VisibleIcons { get { return icons.Where(icon => !icon.Hidden && icon.Image != null); } }
@@ -45,9 +49,31 @@ namespace WinNTDE
             NativeDesktop.SetWindowPos(hwnd, IntPtr.Zero, area.Left, area.Top, area.Width, area.Height, 0x0014);
         }
 
-        internal void RemoveClosedWindows()
+        internal void Refresh()
         {
-            if (icons.RemoveAll(icon => !NativeDesktop.IsWindow(icon.Owner)) > 0) RaiseChanged();
+            if (forwardToExplorer && UpdateReceiver()) AnnounceTaskbar();
+            if (icons.RemoveAll(icon => NativeDesktop.WindowProcess(icon.Owner) != icon.ProcessId) > 0) RaiseChanged();
+        }
+
+        private bool UpdateReceiver()
+        {
+            IntPtr previous = explorer;
+            if (explorer == IntPtr.Zero || !NativeDesktop.IsWindow(explorer)) explorer = FindExplorer();
+            // Shell_NotifyIcon finds the first Shell_TrayWnd. Keep our hidden receiver first without moving Explorer.
+            if (NativeDesktop.FindWindow(ClassName, null) != hwnd)
+                NativeDesktop.SetWindowPos(hwnd, NativeDesktop.Topmost, 0, 0, 0, 0, 0x0013);
+            return explorer != IntPtr.Zero && explorer != previous;
+        }
+
+        private IntPtr FindExplorer()
+        {
+            IntPtr found = NativeDesktop.FindWindowEx(IntPtr.Zero, IntPtr.Zero, ClassName, null);
+            return found == hwnd ? NativeDesktop.FindWindowEx(IntPtr.Zero, hwnd, ClassName, null) : found;
+        }
+
+        private static void AnnounceTaskbar()
+        {
+            NativeDesktop.SendNotifyMessage(NativeDesktop.Broadcast, TaskbarCreated, IntPtr.Zero, IntPtr.Zero);
         }
 
         private void RaiseChanged()
@@ -57,13 +83,22 @@ namespace WinNTDE
 
         private IntPtr HandleMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam)
         {
-            if (message != 0x004A || lParam == IntPtr.Zero)
+            if (message != CopyDataMessage || lParam == IntPtr.Zero)
                 return DefWindowProc(handle, message, wParam, lParam);
             var copy = (CopyData)Marshal.PtrToStructure(lParam, typeof(CopyData));
             if (copy.Buffer == IntPtr.Zero) return IntPtr.Zero;
 
-            if (copy.Kind == new IntPtr(1))
-                return ReadNotifyIcon(copy.Buffer, copy.Size) ? new IntPtr(1) : IntPtr.Zero;
+            bool notification = copy.Kind == new IntPtr(1);
+            bool captured = notification && ReadNotifyIcon(copy.Buffer, copy.Size);
+            if (forwardToExplorer)
+            {
+                if (explorer == IntPtr.Zero || !NativeDesktop.IsWindow(explorer)) explorer = FindExplorer();
+                IntPtr result;
+                if (explorer != IntPtr.Zero &&
+                    NativeDesktop.SendMessageTimeout(explorer, message, wParam, lParam, 2, 1000, out result) != IntPtr.Zero &&
+                    (!captured || result != IntPtr.Zero)) return result;
+            }
+            if (notification) return captured ? new IntPtr(1) : IntPtr.Zero;
             if (copy.Kind == IntPtr.Zero && copy.Size >= 8)
             {
                 int command = Marshal.ReadInt32(copy.Buffer, 4);
@@ -123,7 +158,8 @@ namespace WinNTDE
                 icon.Version = version;
                 return true;
             }
-            if (owner == IntPtr.Zero || !NativeDesktop.IsWindow(owner)) return false;
+            int process = NativeDesktop.WindowProcess(owner);
+            if (process == 0) return false;
             if (icon == null)
             {
                 if (command != 0) return false;
@@ -132,6 +168,7 @@ namespace WinNTDE
             }
 
             icon.Owner = owner;
+            icon.ProcessId = process;
             icon.Id = id;
             if ((flags & 1) != 0) icon.Callback = callback;
             if ((flags & 2) != 0)
@@ -157,7 +194,7 @@ namespace WinNTDE
         {
             internal Guid Guid;
             internal IntPtr Owner;
-            internal int Id, Callback, Version;
+            internal int Id, Callback, Version, ProcessId;
             internal bool Hidden;
             internal string Name;
             internal ImageSource Image;
@@ -187,10 +224,12 @@ namespace WinNTDE
 
         public void Dispose()
         {
+            bool wasMirroring = hwnd != IntPtr.Zero && forwardToExplorer && FindExplorer() != IntPtr.Zero;
             if (hwnd != IntPtr.Zero) DestroyWindow(hwnd);
             hwnd = IntPtr.Zero;
             if (registered) UnregisterClass(ClassName, instance);
             registered = false;
+            if (wasMirroring) AnnounceTaskbar();
         }
 
         private delegate IntPtr WindowProcedure(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
