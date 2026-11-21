@@ -25,6 +25,7 @@
 # WinNTDE File Explorer Window
 - File-Explorer is a WPF Window
 - Feature: copy/paste/cut/delete
+- Feature: "Sys-Menu" Button which opens the right-click menu as if it clicked in empty space on a folder
 - Feature: Del key moves item to trash after asking user with popup whos owner is that File Explorer Window centered on it
 - Feature: Shift+Del will permanatly delete file after asking user
 - Feature: hitting a alpha-numeric key selects a item starting with that character

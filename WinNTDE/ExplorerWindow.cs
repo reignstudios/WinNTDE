@@ -20,7 +20,7 @@ namespace WinNTDE
         private readonly ListView files = new ListView { SelectionMode = SelectionMode.Extended, IsTextSearchEnabled = false };
         private readonly TextBlock status = new TextBlock { Margin = new Thickness(12, 6, 12, 6) };
         private readonly DispatcherTimer refresh = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        private readonly Button back, forward, up, cut, copy, paste, delete, emptyBin;
+        private readonly Button back, forward, up, cut, copy, paste, delete, sysMenu, emptyBin;
         private readonly ContextMenu folderMenu, recycleMenu;
         private FileSystemWatcher watcher;
         private int historyIndex = -1, request;
@@ -63,6 +63,7 @@ namespace WinNTDE
             delete = AddButton(tools, "Delete", "Move to Recycle Bin (Delete)", () => DeleteSelection(false));
             Button view = AddButton(tools, "View ▾", "Change folder view", null);
             view.Click += (s, e) => ShowViewMenu(view);
+            sysMenu = AddButton(tools, "Sys-Menu", "Open the current folder’s Windows context menu", OpenSystemMenu);
             emptyBin = AddButton(tools, "Empty Recycle Bin", "Empty Recycle Bin", EmptyRecycleBin);
             tools.Children.Add(new Border());
 
@@ -365,9 +366,10 @@ namespace WinNTDE
         private void UpdateCommands()
         {
             bool ready = folder != null && !pending && !fileOperation;
-            cut.Visibility = copy.Visibility = paste.Visibility = delete.Visibility = InRecycleBin ? Visibility.Collapsed : Visibility.Visible;
+            cut.Visibility = copy.Visibility = paste.Visibility = delete.Visibility = sysMenu.Visibility =
+                InRecycleBin ? Visibility.Collapsed : Visibility.Visible;
             cut.IsEnabled = copy.IsEnabled = delete.IsEnabled = ready && !InRecycleBin && files.SelectedItems.Count != 0;
-            paste.IsEnabled = ready && !InRecycleBin;
+            paste.IsEnabled = sysMenu.IsEnabled = ready && !InRecycleBin;
             emptyBin.Visibility = InRecycleBin ? Visibility.Visible : Visibility.Collapsed;
             emptyBin.IsEnabled = ready && InRecycleBin && files.Items.Count != 0;
         }
@@ -424,6 +426,13 @@ namespace WinNTDE
             App.AddMenuItem(menu, "Delete", () => DeleteSelection(false));
             menu.PlacementTarget = files;
             menu.IsOpen = true;
+        }
+
+        private void OpenSystemMenu()
+        {
+            if (folder == null || InRecycleBin || pending || fileOperation) return;
+            if (!ShellFileMenu.ShowFolderBackground(this, folder, sysMenu))
+                MessageBox.Show(this, "Windows could not open this folder’s system menu.", "Sys-Menu", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private void DeleteSelection(bool permanent)

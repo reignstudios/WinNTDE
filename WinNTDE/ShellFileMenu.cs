@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 
 namespace WinNTDE
@@ -16,7 +18,6 @@ namespace WinNTDE
             var pidls = new IntPtr[paths.Length];
             IShellFolder folder = null;
             IContextMenu context = null;
-            IntPtr menu = IntPtr.Zero;
             try
             {
                 for (int i = 0; i < paths.Length; i++)
@@ -33,18 +34,79 @@ namespace WinNTDE
                 var hwnd = new WindowInteropHelper(window).Handle;
                 Guid contextId = typeof(IContextMenu).GUID;
                 Marshal.ThrowExceptionForHR(folder.GetUIObjectOf(hwnd, (uint)children.Length, children, ref contextId, IntPtr.Zero, out context));
-                menu = CreatePopupMenu();
+                NativeDesktop.Point cursor;
+                NativeDesktop.GetCursorPos(out cursor);
+                return ShowMenu(window, context, Path.GetDirectoryName(paths[0]), cursor, open);
+            }
+            catch (Exception error) when (IsShellMenuError(error)) { return false; }
+            finally
+            {
+                SystemSettings.Release(context);
+                SystemSettings.Release(folder);
+                foreach (IntPtr pidl in pidls)
+                    if (pidl != IntPtr.Zero) Marshal.FreeCoTaskMem(pidl);
+            }
+        }
+
+        internal static bool ShowFolderBackground(Window window, string path, UIElement anchor)
+        {
+            IContextMenu context = null;
+            try
+            {
+                context = CreateFolderBackgroundMenu(new WindowInteropHelper(window).Handle, path);
+                Point point = anchor.PointToScreen(new Point(0, anchor.RenderSize.Height));
+                var position = new NativeDesktop.Point { X = (int)point.X, Y = (int)point.Y };
+                return ShowMenu(window, context, path, position);
+            }
+            catch (Exception error) when (IsShellMenuError(error)) { return false; }
+            finally { SystemSettings.Release(context); }
+        }
+
+        private static IContextMenu CreateFolderBackgroundMenu(IntPtr hwnd, string path)
+        {
+            IntPtr pidl = IntPtr.Zero;
+            IShellFolder desktop = null, folder = null;
+            try
+            {
+                uint attributes;
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out attributes));
+                Marshal.ThrowExceptionForHR(SHGetDesktopFolder(out desktop));
+                Guid folderId = typeof(IShellFolder).GUID;
+                Marshal.ThrowExceptionForHR(desktop.BindToObject(pidl, IntPtr.Zero, ref folderId, out folder));
+                Guid menuId = typeof(IContextMenu).GUID;
+                IContextMenu context;
+                // The folder's view object supplies the background menu, including the shell's New submenu.
+                Marshal.ThrowExceptionForHR(folder.CreateViewObject(hwnd, ref menuId, out context));
+                return context;
+            }
+            finally
+            {
+                SystemSettings.Release(folder);
+                SystemSettings.Release(desktop);
+                if (pidl != IntPtr.Zero) Marshal.FreeCoTaskMem(pidl);
+            }
+        }
+
+        private static bool ShowMenu(Window window, IContextMenu context, string directory, NativeDesktop.Point position, Action open = null)
+        {
+            if (context == null) return false;
+            var hwnd = new WindowInteropHelper(window).Handle;
+            var source = HwndSource.FromHwnd(hwnd);
+            if (source == null) return false;
+            IntPtr menu = CreatePopupMenu();
+            try
+            {
                 if (menu == IntPtr.Zero) return false;
                 Marshal.ThrowExceptionForHR(context.QueryContextMenu(menu, 0, First, Last,
-                    (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) != 0 ? 0x100u : 0u));
+                    (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 0x100u : 0u));
 
                 if (open != null)
                 {
                     InsertMenu(menu, 0, 0x400, new UIntPtr(Open), "Open in WinNTDE");
                     InsertMenu(menu, 1, 0xC00, UIntPtr.Zero, null);
                 }
+                if (GetMenuItemCount(menu) <= 0) return false;
 
-                var source = HwndSource.FromHwnd(hwnd);
                 var context3 = context as IContextMenu3;
                 var context2 = context3 == null ? context as IContextMenu2 : null;
                 HwndSourceHook hook = (IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled) =>
@@ -58,14 +120,12 @@ namespace WinNTDE
                     return result;
                 };
 
-                NativeDesktop.Point cursor;
-                NativeDesktop.GetCursorPos(out cursor);
                 NativeDesktop.SetForegroundWindow(hwnd);
                 source.AddHook(hook);
                 uint command;
-                try { command = TrackPopupMenuEx(menu, 0x0102, cursor.X, cursor.Y, hwnd, IntPtr.Zero); }
+                try { command = TrackPopupMenuEx(menu, 0x0102, position.X, position.Y, hwnd, IntPtr.Zero); }
                 finally { source.RemoveHook(hook); }
-                if (command == Open) open();
+                if (command == Open && open != null) open();
                 else if (command >= First && command <= Last)
                 {
                     var verb = new IntPtr(command - First);
@@ -76,27 +136,21 @@ namespace WinNTDE
                         Owner = hwnd,
                         Verb = verb,
                         VerbUnicode = verb,
-                        DirectoryUnicode = System.IO.Path.GetDirectoryName(paths[0]),
+                        DirectoryUnicode = directory,
                         Show = 1,
-                        Point = cursor
+                        Point = position
                     };
                     DesktopFiles.Try(window, () => Marshal.ThrowExceptionForHR(context.InvokeCommand(ref invoke)));
                 }
                 return true;
             }
-            catch (Exception error) when (error is COMException || error is System.IO.IOException ||
-                error is UnauthorizedAccessException || error is ArgumentException)
-            {
-                return false;
-            }
-            finally
-            {
-                if (menu != IntPtr.Zero) DestroyMenu(menu);
-                if (context != null) Marshal.ReleaseComObject(context);
-                if (folder != null) Marshal.ReleaseComObject(folder);
-                foreach (IntPtr pidl in pidls)
-                    if (pidl != IntPtr.Zero) Marshal.FreeCoTaskMem(pidl);
-            }
+            finally { if (menu != IntPtr.Zero) DestroyMenu(menu); }
+        }
+
+        private static bool IsShellMenuError(Exception error)
+        {
+            return error is COMException || error is IOException || error is UnauthorizedAccessException ||
+                error is ArgumentException || error is InvalidCastException || error is NotImplementedException;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -117,10 +171,10 @@ namespace WinNTDE
         {
             void ParseDisplayName();
             void EnumObjects();
-            void BindToObject();
+            [PreserveSig] int BindToObject(IntPtr pidl, IntPtr context, ref Guid iid, out IShellFolder folder);
             void BindToStorage();
             void CompareIDs();
-            void CreateViewObject();
+            [PreserveSig] int CreateViewObject(IntPtr owner, ref Guid iid, out IContextMenu context);
             void GetAttributesOf();
             [PreserveSig] int GetUIObjectOf(IntPtr owner, uint count, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]
                 IntPtr[] children, ref Guid iid, IntPtr reserved, out IContextMenu context);
@@ -157,9 +211,11 @@ namespace WinNTDE
         private static extern int SHParseDisplayName(string name, IntPtr context, out IntPtr pidl, uint mask, out uint attributes);
         [DllImport("shell32.dll")]
         private static extern int SHBindToParent(IntPtr pidl, ref Guid id, out IShellFolder folder, out IntPtr child);
+        [DllImport("shell32.dll")] private static extern int SHGetDesktopFolder(out IShellFolder desktop);
         [DllImport("shell32.dll")] private static extern IntPtr ILFindLastID(IntPtr pidl);
         [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
         [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
+        [DllImport("user32.dll")] private static extern int GetMenuItemCount(IntPtr menu);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, UIntPtr id, string text);
         [DllImport("user32.dll")]
