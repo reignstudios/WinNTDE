@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -16,6 +17,7 @@ namespace WinNTDE
         internal bool AutoHide { get; set; }
         internal bool Thumbnails { get; set; }
         internal bool Details { get; set; }
+        internal string[] PinnedApps { get; set; }
         internal event EventHandler Changed;
 
         internal ShellPreferences()
@@ -31,6 +33,9 @@ namespace WinNTDE
                 AutoHide = ReadBool(values, "AutoHide", false);
                 Thumbnails = ReadBool(values, "Thumbnails", false);
                 Details = ReadBool(values, "Details", true);
+                var pins = values.Element("PinnedApps");
+                if (pins != null) PinnedApps = pins.Elements("App").Select(app => app.Value)
+                    .Where(key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -50,7 +55,8 @@ namespace WinNTDE
             string pending = file + ".tmp";
             new XElement("Preferences", new XElement("Wallpaper", Wallpaper ?? ""), new XElement("LightTheme", LightTheme),
                 new XElement("AlignLeft", AlignLeft), new XElement("AutoHide", AutoHide),
-                new XElement("Thumbnails", Thumbnails), new XElement("Details", Details)).Save(pending);
+                new XElement("Thumbnails", Thumbnails), new XElement("Details", Details),
+                PinnedApps == null ? null : new XElement("PinnedApps", PinnedApps.Select(key => new XElement("App", key)))).Save(pending);
             if (File.Exists(file)) File.Replace(pending, file, null);
             else File.Move(pending, file);
         }

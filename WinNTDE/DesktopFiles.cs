@@ -113,6 +113,10 @@ namespace WinNTDE
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr SHGetFileInfo(string path, uint attributes, out FileInfoNative info, uint size, uint flags);
+        [DllImport("shell32.dll", EntryPoint = "SHGetFileInfoW")]
+        private static extern IntPtr SHGetFileInfo(IntPtr pidl, uint attributes, out FileInfoNative info, uint size, uint flags);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern int SHParseDisplayName(string name, IntPtr context, out IntPtr pidl, uint mask, out uint attributes);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SHFileOperation(ref FileOperation operation);
         [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
@@ -127,7 +131,7 @@ namespace WinNTDE
         internal static ImageSource FileIcon(string path, bool isFolder)
         {
             string extension = System.IO.Path.GetExtension(path);
-            bool generic = isFolder || !(new[] { ".exe", ".lnk", ".ico", ".url" }).Contains(extension, StringComparer.OrdinalIgnoreCase);
+            bool generic = isFolder || !(new[] { ".exe", ".lnk", ".ico", ".url", ".appref-ms" }).Contains(extension, StringComparer.OrdinalIgnoreCase);
             string key = isFolder ? "<folder>" : extension;
             ImageSource image;
             if (generic && icons.TryGetValue(key, out image)) return image;
@@ -136,10 +140,29 @@ namespace WinNTDE
             FileInfoNative info;
             SHGetFileInfo(isFolder ? "Folder" : path, isFolder ? 0x10u : 0x80u, out info,
                 (uint)Marshal.SizeOf(typeof(FileInfoNative)), Icon | (generic ? UseAttributes : 0));
-            try { image = NativeDesktop.IconImage(info.Icon, 32); }
-            finally { if (info.Icon != IntPtr.Zero) NativeDesktop.DestroyIcon(info.Icon); }
+            image = ReadIcon(info.Icon);
             if (generic && icons.Count < 256) icons[key] = image;
             return image;
+        }
+
+        internal static ImageSource NamespaceIcon(string name)
+        {
+            IntPtr pidl;
+            uint attributes;
+            if (SHParseDisplayName(name, IntPtr.Zero, out pidl, 0, out attributes) < 0 || pidl == IntPtr.Zero) return null;
+            try
+            {
+                FileInfoNative info;
+                SHGetFileInfo(pidl, 0, out info, (uint)Marshal.SizeOf(typeof(FileInfoNative)), 0x108);
+                return ReadIcon(info.Icon);
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+
+        private static ImageSource ReadIcon(IntPtr icon)
+        {
+            try { return NativeDesktop.IconImage(icon, 32); }
+            finally { if (icon != IntPtr.Zero) NativeDesktop.DestroyIcon(icon); }
         }
 
         internal static ListBoxItem ItemAt(object source)
@@ -152,9 +175,14 @@ namespace WinNTDE
 
         internal static void Open(FileEntry entry)
         {
-            string folder = entry.IsFolder ? entry.Path : LinkedFolder(entry.Path);
+            OpenPath(entry.Path, entry.IsFolder);
+        }
+
+        internal static void OpenPath(string path, bool isFolder = false)
+        {
+            string folder = isFolder ? path : LinkedFolder(path);
             if (folder != null) ((App)Application.Current).OpenExplorer(folder);
-            else Process.Start(new ProcessStartInfo(entry.Path) { WorkingDirectory = Path.GetDirectoryName(entry.Path) });
+            else Process.Start(new ProcessStartInfo(path) { WorkingDirectory = Path.GetDirectoryName(path) });
         }
 
         private static string LinkedFolder(string path)

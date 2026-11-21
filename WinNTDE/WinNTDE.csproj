@@ -64,6 +64,10 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="StartMenuWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
       <SubType>Code</SubType>
@@ -81,6 +85,10 @@
     <Compile Include="SettingsWindow.cs" />
     <Compile Include="ShellFileMenu.cs" />
     <Compile Include="ShellPreferences.cs" />
+    <Compile Include="StartAppCatalog.cs" />
+    <Compile Include="StartMenuWindow.xaml.cs">
+      <DependentUpon>StartMenuWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="SystemSettings.cs" />
     <Compile Include="TaskbarWindow.cs" />
     <Compile Include="Wireless.cs" />

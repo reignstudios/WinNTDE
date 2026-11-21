@@ -18,6 +18,8 @@ namespace WinNTDE
         internal static readonly IntPtr NotTopmost = new IntPtr(-2);
         internal static readonly int ProcessId = System.Diagnostics.Process.GetCurrentProcess().Id;
         private static readonly bool SupportsCaptionColors = Environment.OSVersion.Version >= new Version(10, 0, 22000);
+        private static readonly Lazy<BitmapSource> DefaultAppIcon = new Lazy<BitmapSource>(
+            () => IconImage(LoadIcon(IntPtr.Zero, new IntPtr(32512)), 32));
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Rect
@@ -146,8 +148,10 @@ namespace WinNTDE
                 var window = HwndSource.FromHwnd(hwnd);
                 if (window != null && window.RootVisual is ExplorerWindow) return DesktopFiles.FolderIcon;
             }
-            return IconImage(icon == IntPtr.Zero ? LoadIcon(IntPtr.Zero, new IntPtr(32512)) : icon, 24);
+            return icon == IntPtr.Zero ? ApplicationIcon : IconImage(icon, 24);
         }
+
+        internal static ImageSource ApplicationIcon { get { return DefaultAppIcon.Value; } }
 
         private static IntPtr ClassIcon(IntPtr hwnd, int index)
         {

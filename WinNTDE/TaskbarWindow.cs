@@ -33,6 +33,7 @@ namespace WinNTDE
         private readonly DispatcherTimer edgeRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(150) };
         private readonly Dictionary<IntPtr, TaskItem> windows = new Dictionary<IntPtr, TaskItem>();
         private NotificationArea notifications;
+        private StartMenuWindow startMenu;
         private ContextMenu openMenu;
         private NativeDesktop.Rect previousWork, lastScreen, bounds;
         private IntPtr hwnd, desktop, activeApp;
@@ -56,11 +57,15 @@ namespace WinNTDE
             Content = frame;
 
             bar.Children.Add(group);
-            var menuButton = IconButton("▦", "WinNTDE menu");
-            menuButton.Click += (s, e) => OpenLauncher(menuButton);
+            var menuButton = IconButton("▦", "Start");
+            menuButton.Click += (s, e) => ToggleStartMenu();
             group.Children.Add(menuButton);
             var explorer = IconButton(DesktopFiles.FolderIcon, "File Explorer");
-            explorer.Click += (s, e) => app.OpenExplorer(DesktopFiles.Home);
+            explorer.Click += (s, e) =>
+            {
+                DismissStartMenu();
+                app.OpenExplorer(DesktopFiles.Home);
+            };
             group.Children.Add(explorer);
             taskScroll = new ScrollViewer { Content = tasks, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -77,6 +82,7 @@ namespace WinNTDE
             trayButton = IconButton("⌃", "Notification area");
             trayButton.Click += (s, e) =>
             {
+                DismissStartMenu();
                 mediaPopup.IsOpen = false;
                 if (!tray.IsOpen) RebuildTray();
                 tray.IsOpen = !tray.IsOpen;
@@ -88,6 +94,7 @@ namespace WinNTDE
             var mediaButton = IconButton(ejectIcon, "Eject removable media");
             mediaButton.Click += (s, e) =>
             {
+                DismissStartMenu();
                 tray.IsOpen = false;
                 mediaPopup.IsOpen = !mediaPopup.IsOpen;
                 if (mediaPopup.IsOpen) RefreshMedia();
@@ -105,6 +112,7 @@ namespace WinNTDE
             mediaPopup = CreatePopup(mediaButton, mediaPanel);
 
             var barMenu = App.Menu();
+            barMenu.Opened += (s, e) => DismissStartMenu();
             App.AddMenuItem(barMenu, "Taskbar settings", () => app.OpenSettings("Taskbar"));
             ContextMenu = barMenu;
             app.Preferences.Changed += PreferencesChanged;
@@ -206,6 +214,7 @@ namespace WinNTDE
             int top = collapsed ? area.Bottom - 2 : bounds.Top;
             NativeDesktop.SetWindowPos(hwnd, fullscreen ? NativeDesktop.NotTopmost : NativeDesktop.Topmost,
                 area.Left, top, area.Width, collapsed ? 2 : height, 0x0010);
+            if (startMenu != null && startMenu.IsVisible) startMenu.Position(bounds, area.Top);
             if (adjustWorkArea && app.IsShell)
             {
                 var desired = app.Preferences.AutoHide ? screen : bounds;
@@ -228,7 +237,11 @@ namespace WinNTDE
             if (nowFullscreen != fullscreen)
             {
                 fullscreen = nowFullscreen;
-                if (fullscreen) tray.IsOpen = mediaPopup.IsOpen = false;
+                if (fullscreen)
+                {
+                    tray.IsOpen = mediaPopup.IsOpen = false;
+                    DismissStartMenu();
+                }
                 ApplyPosition(false);
             }
             if (!app.Preferences.AutoHide || fullscreen) return;
@@ -237,7 +250,8 @@ namespace WinNTDE
             DateTime now = DateTime.UtcNow;
             bool overEdge = cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Bottom - 2 && cursor.Y < bounds.Bottom;
             bool overBar = cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Top && cursor.Y < bounds.Bottom;
-            if (!collapsed && (overBar || tray.IsOpen || mediaPopup.IsOpen || (openMenu != null && openMenu.IsOpen) || ContextMenu.IsOpen)) mouseInside = now;
+            if (!collapsed && (overBar || tray.IsOpen || mediaPopup.IsOpen || (openMenu != null && openMenu.IsOpen) ||
+                ContextMenu.IsOpen || (startMenu != null && startMenu.IsVisible))) mouseInside = now;
             if (!overEdge) edgeSeen = DateTime.MinValue;
             else if (edgeSeen == DateTime.MinValue) edgeSeen = now;
             if (collapsed && overEdge && now - edgeSeen > TimeSpan.FromMilliseconds(140))
@@ -309,6 +323,7 @@ namespace WinNTDE
 
         private void ToggleTask(IntPtr window)
         {
+            DismissStartMenu();
             IntPtr current = NativeDesktop.GetForegroundWindow();
             if (current == hwnd) current = activeApp;
             if (current == window && !NativeDesktop.IsIconic(window)) NativeDesktop.ShowWindowAsync(window, 6);
@@ -443,16 +458,26 @@ namespace WinNTDE
             }
         }
 
-        private void OpenLauncher(Button button)
+        private void ToggleStartMenu()
         {
-            var menu = App.Menu();
-            App.AddMenuItem(menu, "File Explorer", () => app.OpenExplorer(DesktopFiles.Home));
-            App.AddMenuItem(menu, "Settings", () => app.OpenSettings());
-            App.AddMenuItem(menu, "Run…", OpenRun);
-            App.AddMenuItem(menu, "Task Manager", () => DesktopFiles.Try(this, () => Process.Start("taskmgr.exe")));
-            menu.Items.Add(new Separator());
-            App.AddMenuItem(menu, "Exit WinNTDE", () => app.ExitDesktop(this));
-            OpenMenu(menu, button);
+            if (startMenu != null && startMenu.IsVisible)
+            {
+                startMenu.Dismiss();
+                return;
+            }
+            tray.IsOpen = mediaPopup.IsOpen = false;
+            if (openMenu != null) openMenu.IsOpen = false;
+            if (startMenu == null)
+            {
+                startMenu = new StartMenuWindow(app, OpenRun) { Owner = this };
+                startMenu.Closed += (s, e) => startMenu = null;
+            }
+            startMenu.Open(bounds, NativeDesktop.WorkArea.Top);
+        }
+
+        private void DismissStartMenu()
+        {
+            if (startMenu != null) startMenu.Dismiss();
         }
 
         private void OpenClock()
@@ -465,6 +490,7 @@ namespace WinNTDE
 
         private void OpenMenu(ContextMenu menu, Button button)
         {
+            DismissStartMenu();
             tray.IsOpen = mediaPopup.IsOpen = false;
             openMenu = menu;
             menu.Closed += (s, e) => { if (openMenu == menu) openMenu = null; };
