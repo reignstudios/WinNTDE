@@ -381,6 +381,48 @@
         </Style.Triggers>
     </Style>
 
+    <Style TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+        <Setter Property="Background" Value="{DynamicResource Raised}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Muted}"/>
+        <Setter Property="Padding" Value="5,0,0,0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <DockPanel x:Name="CheckBoxContent" Background="Transparent" SnapsToDevicePixels="True">
+                        <Border x:Name="Indicator" DockPanel.Dock="Left" Width="14" Height="14" VerticalAlignment="Center"
+                                Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3">
+                            <Path x:Name="Mark" Data="M 0,3 L 3,6 L 9,0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                        </Border>
+                        <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                    </DockPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Indicator" Property="Background" Value="{StaticResource ActiveRow}"/>
+                            <Setter TargetName="Indicator" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="{x:Null}">
+                            <Setter TargetName="Mark" Property="Data" Value="M 0,0 L 7,0"/>
+                            <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Indicator" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Indicator" Property="BorderBrush" Value="{DynamicResource Text}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="CheckBoxContent" Property="Opacity" Value="0.55"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style TargetType="PasswordBox">
         <Setter Property="Background" Value="{DynamicResource Raised}"/>
         <Setter Property="Foreground" Value="{DynamicResource Text}"/>
