@@ -20,7 +20,7 @@ namespace WinNTDE
         private readonly ListView files = new ListView { SelectionMode = SelectionMode.Extended, IsTextSearchEnabled = false };
         private readonly TextBlock status = new TextBlock { Margin = new Thickness(12, 6, 12, 6) };
         private readonly DispatcherTimer refresh = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        private readonly Button back, forward, up, cut, copy, paste, delete, sysMenu, emptyBin;
+        private readonly Button back, forward, up, cut, copy, paste, delete, rename, sysMenu, emptyBin;
         private readonly ContextMenu folderMenu, recycleMenu;
         private FileSystemWatcher watcher;
         private int historyIndex = -1, request;
@@ -54,18 +54,18 @@ namespace WinNTDE
             };
             navigation.Children.Add(address);
 
-            var tools = new DockPanel { Margin = new Thickness(8, 0, 8, 8) };
+            var tools = new WrapPanel { Margin = new Thickness(8, 0, 8, 8) };
             DockPanel.SetDock(tools, Dock.Top);
             root.Children.Add(tools);
             cut = AddButton(tools, "Cut", "Cut (Ctrl+X)", () => Copy(true));
             copy = AddButton(tools, "Copy", "Copy (Ctrl+C)", () => Copy(false));
             paste = AddButton(tools, "Paste", "Paste (Ctrl+V)", Paste);
             delete = AddButton(tools, "Delete", "Move to Recycle Bin (Delete)", () => DeleteSelection(false));
+            rename = AddButton(tools, "Rename", "Rename selected item", RenameSelection);
             Button view = AddButton(tools, "View ▾", "Change folder view", null);
             view.Click += (s, e) => ShowViewMenu(view);
             sysMenu = AddButton(tools, "Sys-Menu", "Open the current folder’s Windows context menu", OpenSystemMenu);
             emptyBin = AddButton(tools, "Empty Recycle Bin", "Empty Recycle Bin", EmptyRecycleBin);
-            tools.Children.Add(new Border());
 
             var side = new StackPanel { Margin = new Thickness(8) };
             var sidebar = new ScrollViewer { Width = 148, Content = side, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -129,7 +129,7 @@ namespace WinNTDE
             Navigate(string.IsNullOrEmpty(initialPath) ? DesktopFiles.Home : initialPath);
         }
 
-        private static Button AddButton(DockPanel bar, string text, string help, Action action)
+        private static Button AddButton(Panel bar, string text, string help, Action action)
         {
             var button = new Button { Content = text, ToolTip = help, Margin = new Thickness(0, 0, 5, 0) };
             System.Windows.Automation.AutomationProperties.SetName(button, help);
@@ -241,7 +241,7 @@ namespace WinNTDE
             if (folder != null && !pending && !fileOperation) LoadFolder(folder, historyIndex);
         }
 
-        private void LoadFolder(string path, int index)
+        private void LoadFolder(string path, int index, string selectPath = null)
         {
             if (fileOperation) return;
             int generation = ++request;
@@ -265,10 +265,15 @@ namespace WinNTDE
                         pending = false;
                         if (details != app.Preferences.Details || thumbnails != app.Preferences.Thumbnails)
                         {
-                            LoadFolder(path, index);
+                            LoadFolder(path, index, selectPath);
                             return;
                         }
                         CommitFolder(path, index, entries);
+                        if (selectPath == null) return;
+                        var renamed = entries.FirstOrDefault(item => string.Equals(item.Path, selectPath, StringComparison.Ordinal));
+                        if (renamed == null) return;
+                        files.SelectedItem = renamed;
+                        files.ScrollIntoView(renamed);
                     }));
                 }
                 catch (Exception error) when (error is IOException || error is UnauthorizedAccessException ||
@@ -366,9 +371,10 @@ namespace WinNTDE
         private void UpdateCommands()
         {
             bool ready = folder != null && !pending && !fileOperation;
-            cut.Visibility = copy.Visibility = paste.Visibility = delete.Visibility = sysMenu.Visibility =
+            cut.Visibility = copy.Visibility = paste.Visibility = delete.Visibility = rename.Visibility = sysMenu.Visibility =
                 InRecycleBin ? Visibility.Collapsed : Visibility.Visible;
             cut.IsEnabled = copy.IsEnabled = delete.IsEnabled = ready && !InRecycleBin && files.SelectedItems.Count != 0;
+            rename.IsEnabled = ready && !InRecycleBin && files.SelectedItems.Count == 1;
             paste.IsEnabled = sysMenu.IsEnabled = ready && !InRecycleBin;
             emptyBin.Visibility = InRecycleBin ? Visibility.Visible : Visibility.Collapsed;
             emptyBin.IsEnabled = ready && InRecycleBin && files.Items.Count != 0;
@@ -449,6 +455,52 @@ namespace WinNTDE
             else
                 ConfirmDeletion("Move to Recycle Bin", "Move " + subject + " to the Recycle Bin?",
                     "Move to Recycle Bin", () => RecycleBin.MoveToBin(this, paths));
+        }
+
+        private void RenameSelection()
+        {
+            if (pending || fileOperation || InRecycleBin || files.SelectedItems.Count != 1) return;
+            var item = (FileEntry)files.SelectedItem;
+            string existingName = Path.GetFileName(item.Path);
+            string renamedPath = null;
+
+            var prompt = new Window { Owner = this, Title = item.IsFolder ? "Rename folder" : "Rename file", Width = 420,
+                SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false };
+            NativeDesktop.ThemeWindow(prompt);
+            prompt.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            var content = new StackPanel { Margin = new Thickness(16) };
+            var name = new TextBox { Text = existingName, Margin = new Thickness(0, 0, 0, 14) };
+            System.Windows.Automation.AutomationProperties.SetName(name, "New name");
+            content.Children.Add(new TextBlock { Text = "New name", Margin = new Thickness(0, 0, 0, 6) });
+            content.Children.Add(name);
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var confirm = new Button { Content = "Rename", IsDefault = true, Margin = new Thickness(0, 0, 6, 0) };
+            confirm.Click += (s, e) =>
+            {
+                if (DesktopFiles.Try(prompt, () => renamedPath = DesktopFiles.Rename(item, name.Text)))
+                    prompt.DialogResult = true;
+                else name.Focus();
+            };
+            buttons.Children.Add(confirm);
+            buttons.Children.Add(new Button { Content = "Cancel", IsCancel = true });
+            content.Children.Add(buttons);
+            prompt.Content = content;
+            prompt.Loaded += (s, e) =>
+            {
+                name.Focus();
+                int nameLength = item.IsFolder ? existingName.Length : Path.GetFileNameWithoutExtension(existingName).Length;
+                name.Select(0, nameLength == 0 ? existingName.Length : nameLength);
+            };
+
+            fileOperation = true;
+            UpdateCommands();
+            try { prompt.ShowDialog(); }
+            finally
+            {
+                fileOperation = false;
+                UpdateCommands();
+                LoadFolder(folder, historyIndex, renamedPath);
+            }
         }
 
         private void EmptyRecycleBin()

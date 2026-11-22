@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -130,6 +131,8 @@ namespace WinNTDE
         private static extern int SHParseDisplayName(string name, IntPtr context, out IntPtr pidl, uint mask, out uint attributes);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SHFileOperation(ref FileOperation operation);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool MoveFileEx(string source, string destination, uint flags);
         [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
 
         internal static IEnumerable<FileEntry> ReadFolder(string path, bool thumbnails, bool details = false)
@@ -301,6 +304,26 @@ namespace WinNTDE
                 Flags = recycle ? (ushort)(NoConfirmation | AllowUndo | WarnIfPermanent) : NoConfirmation
             };
             RunFileOperation(ref operation);
+        }
+
+        internal static string Rename(FileEntry item, string name)
+        {
+            if (string.Equals(Path.GetFileName(item.Path), name, StringComparison.Ordinal)) return item.Path;
+            if (string.IsNullOrEmpty(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                name.EndsWith(" ", StringComparison.Ordinal) || name.EndsWith(".", StringComparison.Ordinal))
+                throw new ArgumentException("Enter a valid name with no trailing spaces or periods.");
+            if (Regex.IsMatch(name, @"^ *(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³]) *(?:\.|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                throw new ArgumentException("That name is reserved by Windows.");
+
+            string destination = Path.Combine(Path.GetDirectoryName(item.Path), name);
+            if (!MoveFileEx(item.Path, destination, 0))
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (error == 80 || error == 183) throw new IOException("A file or folder with that name already exists.");
+                throw new Win32Exception(error);
+            }
+            return destination;
         }
 
         private static bool RunFileOperation(ref FileOperation operation)
