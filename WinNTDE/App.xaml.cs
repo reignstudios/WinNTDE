@@ -15,10 +15,16 @@ namespace WinNTDE
 
         internal ShellPreferences Preferences { get; private set; }
         internal bool IsShell { get; private set; }
+        internal WindowsUpdates Updates { get; } = new WindowsUpdates();
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            if (e.Args.Length != 0 && e.Args[0] == WindowsUpdates.InstallCommand)
+            {
+                Shutdown(WindowsUpdates.InstallFromArguments(e.Args));
+                return;
+            }
             instance = new Mutex(true, @"Local\WinNTDE.Desktop", out ownsInstance);
             if (!ownsInstance)
             {

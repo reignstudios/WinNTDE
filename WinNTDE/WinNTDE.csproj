@@ -104,6 +104,7 @@
     <Compile Include="VolumeWindow.xaml.cs">
       <DependentUpon>VolumeWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="WindowsUpdates.cs" />
     <Compile Include="Wireless.cs" />
   </ItemGroup>
   <ItemGroup>

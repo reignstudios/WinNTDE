@@ -25,6 +25,7 @@ namespace WinNTDE
         private readonly ListBox pages = new ListBox();
         private readonly ScrollViewer body = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         private StackPanel content;
+        private Action refreshUpdates;
         private int pageVersion;
 
         internal SettingsWindow(App app)
@@ -53,7 +54,13 @@ namespace WinNTDE
             pages.SelectionChanged += (s, e) => ShowPage(pages.SelectedItem as string);
             sidebar.Children.Add(pages);
             root.Children.Add(body);
-            Closed += (s, e) => pageVersion++;
+            EventHandler updateChanged = (s, e) => refreshUpdates?.Invoke();
+            app.Updates.Changed += updateChanged;
+            Closed += (s, e) =>
+            {
+                pageVersion++;
+                app.Updates.Changed -= updateChanged;
+            };
             SelectPage("Personalization");
         }
 
@@ -67,6 +74,7 @@ namespace WinNTDE
         {
             if (page == null) return;
             pageVersion++;
+            refreshUpdates = null;
             content = new StackPanel { Margin = new Thickness(24, 17, 24, 20) };
             body.Content = content;
             body.ScrollToTop();
@@ -410,10 +418,82 @@ namespace WinNTDE
 
         private void WindowsUpdate()
         {
-            var scan = AddButton("Check for updates");
+            var updates = app.Updates;
+            var actions = AddActions();
+            var scan = MakeButton("Check for updates", updates.Check);
+            var install = MakeButton("Install selected updates", null);
+            actions.Children.Add(scan);
+            actions.Children.Add(install);
             var status = AddStatus();
-            scan.Click += (s, e) => Run(scan, status, "Checking for updates…", SystemSettings.CheckForUpdates,
-                count => status.Text = count == 0 ? "No applicable updates found." : count + (count == 1 ? " update available." : " updates available."));
+            var check = new FrameworkElementFactory(typeof(CheckBox));
+            check.SetValue(FocusableProperty, false);
+            check.SetBinding(CheckBox.IsCheckedProperty, new Binding("IsSelected") { Mode = BindingMode.TwoWay,
+                RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ListBoxItem), 1) });
+            var title = new FrameworkElementFactory(typeof(TextBlock));
+            title.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
+            title.SetBinding(TextBlock.TextProperty, new Binding("Title"));
+            check.AppendChild(title);
+            var list = new ListBox { SelectionMode = SelectionMode.Multiple, MaxHeight = 280,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch, ItemTemplate = new DataTemplate { VisualTree = check } };
+            ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
+            System.Windows.Automation.AutomationProperties.SetName(list, "Available updates");
+            content.Children.Add(list);
+
+            Action updateButtons = () =>
+            {
+                scan.IsEnabled = !updates.Busy;
+                install.IsEnabled = !updates.Busy && list.SelectedItems.Count != 0;
+            };
+            list.SelectionChanged += (s, e) => updateButtons();
+            refreshUpdates = () =>
+            {
+                status.Text = updates.Status;
+                if (!ReferenceEquals(list.ItemsSource, updates.Available)) list.ItemsSource = updates.Available;
+                list.Visibility = updates.Available.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+                list.IsEnabled = !updates.Busy;
+                updateButtons();
+            };
+            install.Click += (s, e) =>
+            {
+                var selected = list.SelectedItems.Cast<WindowsUpdates.Update>().ToArray();
+                if (selected.Length == 0 || updates.Busy) return;
+                if (selected.Length > 1 && selected.Any(update => update.Exclusive))
+                {
+                    status.Text = "Select " + selected.First(update => update.Exclusive).Title + " on its own to install it.";
+                    return;
+                }
+                if (AcceptUpdateLicenses(selected)) updates.Install(selected);
+            };
+            refreshUpdates();
+        }
+
+        private bool AcceptUpdateLicenses(WindowsUpdates.Update[] selected)
+        {
+            var licenses = selected.Where(update => update.License != null).ToArray();
+            if (licenses.Length == 0) return true;
+            if (licenses.Any(update => string.IsNullOrWhiteSpace(update.License)))
+            {
+                MessageBox.Show(this, "Windows Update could not load the license terms for one of the selected updates. Check for updates again.",
+                    "Windows Update", MessageBoxButton.OK, MessageBoxImage.Information);
+                return false;
+            }
+
+            var dialog = new Window { Title = "Update license terms", Owner = this, Width = 600, Height = 440,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
+            NativeDesktop.ThemeWindow(dialog);
+            var layout = new DockPanel { Margin = new Thickness(16) };
+            var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            DockPanel.SetDock(buttons, Dock.Bottom);
+            buttons.Children.Add(MakeButton("Accept and install", () => dialog.DialogResult = true));
+            var cancel = MakeButton("Cancel", null);
+            cancel.IsCancel = true;
+            buttons.Children.Add(cancel);
+            layout.Children.Add(buttons);
+            layout.Children.Add(new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Text = string.Join("\n\n", licenses.Select(update => update.Title + "\n\n" + update.License)) });
+            dialog.Content = layout;
+            return dialog.ShowDialog() == true;
         }
 
         private void Wifi()

@@ -253,28 +253,6 @@ namespace WinNTDE
             return Process.Start(new ProcessStartInfo(program, value.Substring(end).TrimStart()) { UseShellExecute = true });
         }
 
-        internal static int CheckForUpdates()
-        {
-            object session = null, searcher = null, result = null, updates = null;
-            try
-            {
-                session = Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.Session", true));
-                searcher = ((dynamic)session).CreateUpdateSearcher();
-                result = ((dynamic)searcher).Search("IsInstalled=0 and IsHidden=0");
-                int status = ((dynamic)result).ResultCode;
-                if (status != 2 && status != 3) throw new InvalidOperationException("Windows Update returned status " + status + ".");
-                updates = ((dynamic)result).Updates;
-                return ((dynamic)updates).Count;
-            }
-            finally
-            {
-                Release(updates);
-                Release(result);
-                Release(searcher);
-                Release(session);
-            }
-        }
-
         internal static string SystemSummary()
         {
             string summary = Environment.OSVersion.VersionString + "   ·   " + (Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit");
