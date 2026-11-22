@@ -10,7 +10,8 @@
 - Background Window supports Wallpaper in settings Window but defaults to black
 
 # WinNTDE Taskbar Window
-- Task bar is a WPF Window that overlays other non-fullscreen Windows
+- Taskbar is a WPF Window that overlays other non-fullscreen Windows
+- Taskbar is setup to tell other app windows when they maximize to understand its region (but not when auto-hide is enabled)
 - Feature: Win11 like just showing app icon
 - Feature: Time shows in right corner
 - Feature: Tray icons show in popup like Win11 taskbar showing app tray icons

@@ -12,6 +12,8 @@ namespace WinNTDE
     {
         internal const int DisplayChanged = 0x007E;
         internal const int HotKey = 0x0312;
+        internal const int SettingChanged = 0x001A;
+        internal const int SetWorkAreaAction = 0x002F;
         internal static readonly IntPtr Broadcast = new IntPtr(0xFFFF);
         internal static readonly IntPtr Bottom = new IntPtr(1);
         internal static readonly IntPtr Topmost = new IntPtr(-1);
@@ -86,10 +88,10 @@ namespace WinNTDE
             }
         }
 
-        internal static void SetWorkArea(Rect bounds)
+        internal static bool SetWorkArea(Rect bounds)
         {
             // SPIF_SENDCHANGE notifies maximized windows without persisting the session work area.
-            SystemParametersInfo(0x002F, 0, ref bounds, 2);
+            return SystemParametersInfo(SetWorkAreaAction, 0, ref bounds, 2);
         }
 
         internal static void RegisterShell(IntPtr hwnd)

@@ -37,13 +37,15 @@ namespace WinNTDE
         private readonly DispatcherTimer edgeRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(150) };
         private readonly Dictionary<IntPtr, TaskItem> windows = new Dictionary<IntPtr, TaskItem>();
         private NotificationArea notifications;
+        private TaskbarAppBar appBar;
         private ShellKeyHook shellKeys;
         private StartMenuWindow startMenu;
         private VolumeWindow volumeWindow;
         private ContextMenu openMenu;
         private NativeDesktop.Rect previousWork, lastScreen, bounds;
+        private NativeDesktop.Rect? reservedShellWork;
         private IntPtr hwnd, desktop, activeApp;
-        private bool fullscreen, collapsed, workAreaChanged, trayRefreshPending, mediaBusy, mediaRefreshPending, closed;
+        private bool fullscreen, collapsed, positionPending, trayRefreshPending, mediaBusy, mediaRefreshPending, closed;
         private DateTime edgeSeen, mouseInside;
 
         internal TaskbarWindow(App app)
@@ -135,6 +137,7 @@ namespace WinNTDE
             edgeRefresh.Tick += (s, e) => RefreshEdge();
             bar.SizeChanged += (s, e) => SizeTasks();
             right.SizeChanged += (s, e) => SizeTasks();
+            Closing += (s, e) => { if (appBar != null) appBar.Release(); };
             Closed += (s, e) =>
             {
                 closed = true;
@@ -144,7 +147,7 @@ namespace WinNTDE
                 app.Preferences.Changed -= PreferencesChanged;
                 if (shellKeys != null) shellKeys.Dispose();
                 if (notifications != null) notifications.Dispose();
-                if (workAreaChanged)
+                if (reservedShellWork.HasValue && NativeDesktop.WorkArea.Equals(reservedShellWork.Value))
                 {
                     var screen = NativeDesktop.Screen;
                     var restore = lastScreen.Width == screen.Width && lastScreen.Height == screen.Height ? previousWork : screen;
@@ -167,8 +170,9 @@ namespace WinNTDE
                 notifications.Changed += OnTrayChanged;
             }
             catch (Win32Exception) { }
+            if (!app.IsShell) appBar = new TaskbarAppBar(hwnd, notifications);
             mouseInside = DateTime.UtcNow;
-            ApplyPosition(true);
+            UpdateBounds();
             RefreshTasks();
             try { shellKeys = new ShellKeyHook(QueueStartMenu, QueueVolumeChange); }
             catch (Win32Exception error) { Trace.TraceWarning("Could not register shell keys: {0}", error.Message); }
@@ -190,8 +194,11 @@ namespace WinNTDE
                 if (!closed) ChangeVolume(wParam.ToInt32());
                 return IntPtr.Zero;
             }
-            if (message == NativeDesktop.DisplayChanged || message == 0x02E0)
-                Dispatcher.BeginInvoke(new Action(() => ApplyPosition(true)));
+            if (message == NativeDesktop.DisplayChanged || message == 0x02E0 ||
+                (appBar != null && (message == NotificationArea.TaskbarCreated ||
+                    (app.Preferences.AutoHide && message == NativeDesktop.SettingChanged && wParam == new IntPtr(NativeDesktop.SetWorkAreaAction)) ||
+                    (message == TaskbarAppBar.CallbackMessage && wParam == new IntPtr(TaskbarAppBar.PositionChanged)))))
+                QueuePositionUpdate();
             if (message == 0x0219 && mediaPopup.IsOpen) // WM_DEVICECHANGE
             {
                 int change = wParam.ToInt32();
@@ -211,7 +218,7 @@ namespace WinNTDE
             UpdateAlignment();
             collapsed = false;
             mouseInside = DateTime.UtcNow;
-            ApplyPosition(true);
+            UpdateBounds();
         }
 
         private void UpdateAlignment()
@@ -227,35 +234,62 @@ namespace WinNTDE
             taskScroll.MaxWidth = Math.Max(0, remaining);
         }
 
-        private void ApplyPosition(bool adjustWorkArea)
+        private void QueuePositionUpdate()
         {
-            if (hwnd == IntPtr.Zero) return;
+            if (positionPending || closed) return;
+            positionPending = true;
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                positionPending = false;
+                UpdateBounds();
+            }));
+        }
+
+        private void UpdateBounds()
+        {
+            if (hwnd == IntPtr.Zero || closed) return;
             var screen = NativeDesktop.Screen;
             if (screen.Width != lastScreen.Width || screen.Height != lastScreen.Height)
             {
                 lastScreen = screen;
                 previousWork = screen;
             }
-            var area = app.IsShell ? screen : NativeDesktop.WorkArea;
             int height = (int)Math.Round(BarHeight * NativeDesktop.ChromeScale);
-            bounds = new NativeDesktop.Rect { Left = area.Left, Right = area.Right, Top = area.Bottom - height, Bottom = area.Bottom };
-            if (notifications != null && adjustWorkArea) notifications.Place(bounds);
-            int top = collapsed ? area.Bottom - 2 : bounds.Top;
-            NativeDesktop.SetWindowPos(hwnd, fullscreen ? NativeDesktop.NotTopmost : NativeDesktop.Topmost,
-                area.Left, top, area.Width, collapsed ? 2 : height, 0x0010);
-            if (startMenu != null && startMenu.IsVisible) startMenu.Position(bounds, area.Top);
-            if (volumeWindow != null) volumeWindow.Position(bounds, area.Top);
-            if (adjustWorkArea && app.IsShell)
+            NativeDesktop.Rect? appBarBounds = null;
+            if (appBar != null)
             {
-                var desired = app.Preferences.AutoHide ? screen : bounds;
-                desired.Top = screen.Top;
-                NativeDesktop.Rect current = NativeDesktop.WorkArea;
-                if (desired.Bottom != current.Bottom || desired.Right != current.Right || desired.Top != current.Top || desired.Left != current.Left)
-                {
-                    NativeDesktop.SetWorkArea(desired);
-                    workAreaChanged = true;
-                }
+                if (app.Preferences.AutoHide) appBar.Release();
+                else appBarBounds = appBar.Reserve(BottomBar(screen, height));
             }
+            bounds = appBarBounds ?? BottomBar(app.IsShell ? screen : NativeDesktop.WorkArea, height);
+            if (app.IsShell)
+            {
+                var desired = screen;
+                if (!app.Preferences.AutoHide) desired.Bottom = bounds.Top;
+                if (!NativeDesktop.WorkArea.Equals(desired) && NativeDesktop.SetWorkArea(desired))
+                    reservedShellWork = desired;
+            }
+            if (notifications != null) notifications.Place(bounds);
+            ApplyPosition();
+        }
+
+        private static NativeDesktop.Rect BottomBar(NativeDesktop.Rect area, int height)
+        {
+            area.Top = Math.Max(area.Top, area.Bottom - height);
+            return area;
+        }
+
+        private void ApplyPosition()
+        {
+            var visible = bounds;
+            if (collapsed) visible.Top = Math.Max(visible.Top, visible.Bottom - 2);
+            NativeDesktop.Rect current;
+            bool moved = !NativeDesktop.GetWindowRect(hwnd, out current) || !visible.Equals(current);
+            if (NativeDesktop.SetWindowPos(hwnd, fullscreen ? NativeDesktop.NotTopmost : NativeDesktop.Topmost,
+                visible.Left, visible.Top, visible.Width, visible.Height, 0x0010) && moved && appBar != null)
+                appBar.NotifyPositionChanged();
+            if (startMenu != null && startMenu.IsVisible) startMenu.Position(bounds, NativeDesktop.WorkArea.Top);
+            if (volumeWindow != null) volumeWindow.Position(bounds, NativeDesktop.WorkArea.Top);
         }
 
         private void RefreshEdge()
@@ -272,7 +306,7 @@ namespace WinNTDE
                     tray.IsOpen = mediaPopup.IsOpen = false;
                     DismissStartMenu();
                 }
-                ApplyPosition(false);
+                ApplyPosition();
             }
             if (!app.Preferences.AutoHide || fullscreen) return;
             NativeDesktop.Point cursor;
@@ -288,12 +322,12 @@ namespace WinNTDE
             {
                 collapsed = false;
                 mouseInside = now;
-                ApplyPosition(false);
+                ApplyPosition();
             }
             else if (!collapsed && now - mouseInside > TimeSpan.FromMilliseconds(500))
             {
                 collapsed = true;
-                ApplyPosition(false);
+                ApplyPosition();
             }
         }
 
@@ -523,7 +557,7 @@ namespace WinNTDE
             {
                 collapsed = false;
                 mouseInside = DateTime.UtcNow;
-                ApplyPosition(false);
+                ApplyPosition();
             }
             tray.IsOpen = mediaPopup.IsOpen = false;
             if (openMenu != null) openMenu.IsOpen = false;

@@ -11,7 +11,7 @@ namespace WinNTDE
     {
         private const string ClassName = "Shell_TrayWnd";
         private const uint CopyDataMessage = 0x004A;
-        private static readonly uint TaskbarCreated = NativeDesktop.RegisterWindowMessage("TaskbarCreated");
+        internal static readonly uint TaskbarCreated = NativeDesktop.RegisterWindowMessage("TaskbarCreated");
         private readonly List<TrayIcon> icons = new List<TrayIcon>();
         private readonly WindowProcedure procedure;
         private readonly IntPtr instance = GetModuleHandle(null);
@@ -47,6 +47,30 @@ namespace WinNTDE
         internal void Place(NativeDesktop.Rect area)
         {
             NativeDesktop.SetWindowPos(hwnd, IntPtr.Zero, area.Left, area.Top, area.Width, area.Height, 0x0014);
+        }
+
+        internal void WithExplorerTray(Action<IntPtr> action)
+        {
+            if (!forwardToExplorer || hwnd == IntPtr.Zero || FindExplorer() == IntPtr.Zero)
+            {
+                action(IntPtr.Zero);
+                return;
+            }
+
+            // Shell32 sends appbar requests to the first Shell_TrayWnd and can share data with that process.
+            // Let Explorer receive those requests directly while keeping our notification receiver available.
+            bool wasFirst = NativeDesktop.FindWindow(ClassName, null) == hwnd;
+            if (wasFirst)
+                NativeDesktop.SetWindowPos(hwnd, NativeDesktop.Bottom, 0, 0, 0, 0, 0x0013);
+            try
+            {
+                IntPtr target = NativeDesktop.FindWindow(ClassName, null);
+                action(target == hwnd ? IntPtr.Zero : target);
+            }
+            finally
+            {
+                if (wasFirst) NativeDesktop.SetWindowPos(hwnd, NativeDesktop.Topmost, 0, 0, 0, 0, 0x0013);
+            }
         }
 
         internal void Refresh()

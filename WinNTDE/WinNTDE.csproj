@@ -100,6 +100,7 @@
       <DependentUpon>StartMenuWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="SystemSettings.cs" />
+    <Compile Include="TaskbarAppBar.cs" />
     <Compile Include="TaskbarWindow.cs" />
     <Compile Include="VolumeWindow.xaml.cs">
       <DependentUpon>VolumeWindow.xaml</DependentUpon>
