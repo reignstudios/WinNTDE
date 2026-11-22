@@ -278,13 +278,20 @@ namespace WinNTDE
                 MessageBox.Show(message, "WinNTDE", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
-        internal static void PutOnClipboard(IEnumerable<FileEntry> items, bool move)
+        internal static DataObject CreateFileDropData(IEnumerable<FileEntry> items)
         {
             var files = new StringCollection();
             files.AddRange(items.Select(item => item.Path).ToArray());
-            if (files.Count == 0) return;
+            if (files.Count == 0) return null;
             var data = new DataObject();
             data.SetFileDropList(files);
+            return data;
+        }
+
+        internal static void PutOnClipboard(IEnumerable<FileEntry> items, bool move)
+        {
+            var data = CreateFileDropData(items);
+            if (data == null) return;
             byte[] effect = BitConverter.GetBytes(move ? 2 : 5);
             data.SetData(DropEffect, new MemoryStream(effect), false);
             Clipboard.SetDataObject(data, true);

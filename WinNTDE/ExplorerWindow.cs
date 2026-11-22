@@ -26,7 +26,10 @@ namespace WinNTDE
         private int historyIndex = -1, request;
         private string folder;
         private bool pending, fileOperation;
+        private FileEntry[] dragItems;
+        private Point dragOrigin;
         private bool InRecycleBin { get { return folder == RecycleBin.Location; } }
+        private bool CanDragFiles { get { return folder != null && !pending && !fileOperation && !InRecycleBin; } }
 
         internal ExplorerWindow(string initialPath)
         {
@@ -102,6 +105,10 @@ namespace WinNTDE
             root.Children.Add(files);
             VirtualizingStackPanel.SetVirtualizationMode(files, VirtualizationMode.Recycling);
             files.SelectionChanged += (s, e) => { if (!pending) UpdateStatus(); };
+            files.PreviewMouseLeftButtonDown += PrepareFileDrag;
+            files.PreviewMouseLeftButtonUp += (s, e) => dragItems = null;
+            files.PreviewMouseMove += StartFileDrag;
+            files.LostMouseCapture += (s, e) => { if (e.OriginalSource == files) dragItems = null; };
             files.MouseDoubleClick += (s, e) =>
             {
                 if (e.ChangedButton == MouseButton.Left && DesktopFiles.ItemAt(e.OriginalSource) != null) OpenSelected();
@@ -257,6 +264,7 @@ namespace WinNTDE
         private void LoadFolder(string path, int index, string selectPath = null)
         {
             if (fileOperation) return;
+            dragItems = null;
             int generation = ++request;
             bool thumbnails = app.Preferences.Thumbnails;
             bool details = app.Preferences.Details;
@@ -401,6 +409,44 @@ namespace WinNTDE
         }
 
         private FileEntry[] Selection() { return files.SelectedItems.Cast<FileEntry>().ToArray(); }
+
+        private void PrepareFileDrag(object sender, MouseButtonEventArgs e)
+        {
+            dragItems = null;
+            if (!CanDragFiles || e.ClickCount != 1 || Keyboard.Modifiers != ModifierKeys.None) return;
+            var row = DesktopFiles.ItemAt(e.OriginalSource);
+            var entry = row == null ? null : row.Content as FileEntry;
+            if (entry == null) return;
+
+            // WPF may reduce the selection to the clicked row before the drag begins.
+            dragItems = row.IsSelected ? Selection() : new[] { entry };
+            dragOrigin = e.GetPosition(files);
+        }
+
+        private void StartFileDrag(object sender, MouseEventArgs e)
+        {
+            if (dragItems == null) return;
+            if (!CanDragFiles || e.LeftButton != MouseButtonState.Pressed)
+            {
+                dragItems = null;
+                return;
+            }
+
+            Vector distance = e.GetPosition(files) - dragOrigin;
+            if (Math.Abs(distance.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                Math.Abs(distance.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+            var items = dragItems;
+            dragItems = null;
+            files.ReleaseMouseCapture();
+            if (items.Length == 0) return;
+            files.SelectedItem = items[0];
+            foreach (var item in items.Skip(1)) files.SelectedItems.Add(item);
+
+            var data = DesktopFiles.CreateFileDropData(items);
+            e.Handled = true;
+            DesktopFiles.Try(this, () => DragDrop.DoDragDrop(files, data, DragDropEffects.Copy));
+        }
 
         private void OpenSelected()
         {
