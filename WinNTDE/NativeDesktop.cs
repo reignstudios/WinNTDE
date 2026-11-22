@@ -14,12 +14,15 @@ namespace WinNTDE
         internal const int HotKey = 0x0312;
         internal const int SettingChanged = 0x001A;
         internal const int SetWorkAreaAction = 0x002F;
+        private const int Caption = 0x00C00000, Layered = 0x00080000, Transparent = 0x0020;
+        private const int ToolWindow = 0x0080, AppWindow = 0x00040000, NoActivate = 0x08000000;
         internal static readonly IntPtr Broadcast = new IntPtr(0xFFFF);
         internal static readonly IntPtr Bottom = new IntPtr(1);
         internal static readonly IntPtr Topmost = new IntPtr(-1);
-        internal static readonly IntPtr NotTopmost = new IntPtr(-2);
         internal static readonly int ProcessId = System.Diagnostics.Process.GetCurrentProcess().Id;
         private static readonly bool SupportsCaptionColors = Environment.OSVersion.Version >= new Version(10, 0, 22000);
+        private static readonly bool SupportsDwm = Environment.OSVersion.Version.Major >= 6;
+        private static readonly bool SupportsCloaking = Environment.OSVersion.Version >= new Version(6, 2);
         private static readonly Lazy<BitmapSource> DefaultAppIcon = new Lazy<BitmapSource>(
             () => IconImage(LoadIcon(IntPtr.Zero, new IntPtr(32512)), 32));
 
@@ -48,6 +51,7 @@ namespace WinNTDE
         [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hwnd);
         [DllImport("user32.dll")] internal static extern IntPtr GetLastActivePopup(IntPtr hwnd);
         [DllImport("user32.dll")] internal static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+        [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
         [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr hwnd);
         [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr hwnd);
         [DllImport("user32.dll")] internal static extern bool IsIconic(IntPtr hwnd);
@@ -64,6 +68,9 @@ namespace WinNTDE
         [DllImport("user32.dll")] internal static extern bool SendNotifyMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] private static extern int GetWindowThreadProcessId(IntPtr hwnd, out int process);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr hwnd, int index);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int size);
+        [DllImport("user32.dll")] private static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint key, out byte alpha, out uint flags);
         [DllImport("user32.dll", EntryPoint = "GetClassLongW")] private static extern uint GetClassLong32(IntPtr hwnd, int index);
         [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] private static extern IntPtr GetClassLong64(IntPtr hwnd, int index);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int size);
@@ -74,6 +81,7 @@ namespace WinNTDE
         [DllImport("user32.dll")] private static extern IntPtr CopyIcon(IntPtr icon);
         [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr resource);
         [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
+        [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect value, int size);
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
 
         internal static Rect Screen { get { return new Rect { Right = GetSystemMetrics(0), Bottom = GetSystemMetrics(1) }; } }
@@ -102,27 +110,77 @@ namespace WinNTDE
 
         internal static bool IsApplicationWindow(IntPtr hwnd)
         {
-            const int ToolWindow = 0x80, AppWindow = 0x40000, NoActivate = 0x08000000;
-            if (!IsWindowVisible(hwnd)) return false;
-            int style = GetWindowLong(hwnd, -20);
-            if ((style & AppWindow) == 0 && ((style & (ToolWindow | NoActivate)) != 0 ||
-                GetWindow(hwnd, 4) != IntPtr.Zero)) return false;
-            if (Environment.OSVersion.Version >= new Version(6, 2))
-            {
-                int cloaked;
-                if (DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0) return false;
-            }
-            return true;
+            return IsWindowVisible(hwnd) && HasTaskButton(hwnd, GetWindowLong(hwnd, -20)) && !IsCloaked(hwnd);
         }
 
-        internal static bool IsFullscreen(IntPtr hwnd, IntPtr desktop)
+        private static bool HasTaskButton(IntPtr hwnd, int style)
         {
-            if (hwnd == IntPtr.Zero || hwnd == desktop || IsIconic(hwnd) ||
-                (IsZoomed(hwnd) && (GetWindowLong(hwnd, -16) & 0x00C00000) != 0)) return false;
+            return (style & AppWindow) != 0 || ((style & (ToolWindow | NoActivate)) == 0 && GetWindow(hwnd, 4) == IntPtr.Zero);
+        }
+
+        private static bool IsCloaked(IntPtr hwnd)
+        {
+            int cloaked;
+            return SupportsCloaking && DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0;
+        }
+
+        internal static IntPtr FindFullscreenWindow(IntPtr taskbar, IntPtr desktop, IntPtr foreground)
+        {
+            IntPtr shellDesktop = GetShellWindow();
+            if (foreground == IntPtr.Zero || foreground == taskbar || foreground == desktop || foreground == shellDesktop)
+                return IntPtr.Zero;
+
+            var screen = Screen;
+            const uint RootOwner = 3; // GA_ROOTOWNER
+            IntPtr root = GetAncestor(foreground, RootOwner);
+            if (root == IntPtr.Zero) root = foreground;
+            int process = WindowProcess(foreground);
+            IntPtr fullscreen = IntPtr.Zero;
+            // The active app can display an owned video popup without handing it focus.
+            EnumWindows((window, data) =>
+            {
+                if (window == desktop || window == shellDesktop) return false;
+                if (window != taskbar && IsWindowVisible(window) && (window == foreground || GetAncestor(window, RootOwner) == root ||
+                    WindowProcess(window) == process) && IsFullscreen(window, screen))
+                {
+                    fullscreen = window;
+                    return false;
+                }
+                return window != root;
+            }, IntPtr.Zero);
+            return fullscreen;
+        }
+
+        private static bool IsFullscreen(IntPtr window, Rect screen)
+        {
             Rect bounds;
-            Rect screen = Screen;
-            return GetWindowRect(hwnd, out bounds) && bounds.Left <= screen.Left && bounds.Top <= screen.Top &&
-                bounds.Right >= screen.Right && bounds.Bottom >= screen.Bottom;
+            if (IsIconic(window) || !GetWindowRect(window, out bounds) ||
+                !CoversScreen(bounds, screen) || IsCloaked(window) || GetProp(window, "NonRudeHWND") != IntPtr.Zero ||
+                (IsZoomed(window) && (GetWindowLong(window, -16) & Caption) != 0)) return false;
+
+            int style = GetWindowLong(window, -20);
+            if ((style & Layered) != 0)
+            {
+                if ((style & Transparent) != 0) return false;
+                uint key, flags;
+                byte alpha;
+                if (GetLayeredWindowAttributes(window, out key, out alpha, out flags) && (flags & 2) != 0 && alpha == 0)
+                    return false;
+            }
+
+            Rect frame;
+            if (SupportsDwm && DwmGetWindowAttribute(window, 9, out frame, Marshal.SizeOf(typeof(Rect))) == 0 &&
+                frame.Width > 0 && frame.Height > 0) bounds = frame;
+            if (!CoversScreen(bounds, screen)) return false;
+            var name = new StringBuilder(32);
+            GetClassName(window, name, name.Capacity);
+            string windowClass = name.ToString();
+            return windowClass != "WorkerW" && windowClass != "Progman";
+        }
+
+        private static bool CoversScreen(Rect bounds, Rect screen)
+        {
+            return bounds.Left <= screen.Left && bounds.Top <= screen.Top && bounds.Right >= screen.Right && bounds.Bottom >= screen.Bottom;
         }
 
         internal static int WindowProcess(IntPtr hwnd)

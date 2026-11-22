@@ -44,8 +44,8 @@ namespace WinNTDE
         private ContextMenu openMenu;
         private NativeDesktop.Rect previousWork, lastScreen, bounds;
         private NativeDesktop.Rect? reservedShellWork;
-        private IntPtr hwnd, desktop, activeApp;
-        private bool fullscreen, collapsed, positionPending, trayRefreshPending, mediaBusy, mediaRefreshPending, closed;
+        private IntPtr hwnd, desktop, activeApp, fullscreenWindow;
+        private bool collapsed, positionPending, trayRefreshPending, mediaBusy, mediaRefreshPending, closed;
         private DateTime edgeSeen, mouseInside;
 
         internal TaskbarWindow(App app)
@@ -199,6 +199,15 @@ namespace WinNTDE
                     (app.Preferences.AutoHide && message == NativeDesktop.SettingChanged && wParam == new IntPtr(NativeDesktop.SetWorkAreaAction)) ||
                     (message == TaskbarAppBar.CallbackMessage && wParam == new IntPtr(TaskbarAppBar.PositionChanged)))))
                 QueuePositionUpdate();
+            if (appBar != null && message == TaskbarAppBar.CallbackMessage && wParam == new IntPtr(TaskbarAppBar.FullscreenChanged))
+            {
+                bool opening = lParam != IntPtr.Zero;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (opening) RefreshEdge();
+                    else SetFullscreenWindow(IntPtr.Zero);
+                }));
+            }
             if (message == 0x0219 && mediaPopup.IsOpen) // WM_DEVICECHANGE
             {
                 int change = wParam.ToInt32();
@@ -285,30 +294,27 @@ namespace WinNTDE
             if (collapsed) visible.Top = Math.Max(visible.Top, visible.Bottom - 2);
             NativeDesktop.Rect current;
             bool moved = !NativeDesktop.GetWindowRect(hwnd, out current) || !visible.Equals(current);
-            if (NativeDesktop.SetWindowPos(hwnd, fullscreen ? NativeDesktop.NotTopmost : NativeDesktop.Topmost,
-                visible.Left, visible.Top, visible.Width, visible.Height, 0x0010) && moved && appBar != null)
-                appBar.NotifyPositionChanged();
+            IntPtr after = fullscreenWindow == IntPtr.Zero ? NativeDesktop.Topmost : fullscreenWindow;
+            bool positioned = NativeDesktop.SetWindowPos(hwnd, after, visible.Left, visible.Top, visible.Width, visible.Height, 0x0010);
+            if (!positioned && fullscreenWindow != IntPtr.Zero)
+            {
+                // The fullscreen window can close between enumeration and positioning.
+                fullscreenWindow = IntPtr.Zero;
+                positioned = NativeDesktop.SetWindowPos(hwnd, NativeDesktop.Topmost, visible.Left, visible.Top, visible.Width, visible.Height, 0x0010);
+            }
+            if (positioned && moved && appBar != null) appBar.NotifyPositionChanged();
             if (startMenu != null && startMenu.IsVisible) startMenu.Position(bounds, NativeDesktop.WorkArea.Top);
             if (volumeWindow != null) volumeWindow.Position(bounds, NativeDesktop.WorkArea.Top);
         }
 
         private void RefreshEdge()
         {
+            if (closed) return;
             IntPtr active = NativeDesktop.GetForegroundWindow();
             if (active != hwnd && active != IntPtr.Zero && NativeDesktop.WindowProcess(active) != NativeDesktop.ProcessId)
                 activeApp = active;
-            bool nowFullscreen = active != hwnd && NativeDesktop.IsFullscreen(active, desktop);
-            if (nowFullscreen != fullscreen)
-            {
-                fullscreen = nowFullscreen;
-                if (fullscreen)
-                {
-                    tray.IsOpen = mediaPopup.IsOpen = false;
-                    DismissStartMenu();
-                }
-                ApplyPosition();
-            }
-            if (!app.Preferences.AutoHide || fullscreen) return;
+            SetFullscreenWindow(NativeDesktop.FindFullscreenWindow(hwnd, desktop, active));
+            if (!app.Preferences.AutoHide || fullscreenWindow != IntPtr.Zero) return;
             NativeDesktop.Point cursor;
             if (!NativeDesktop.GetCursorPos(out cursor)) return;
             DateTime now = DateTime.UtcNow;
@@ -329,6 +335,19 @@ namespace WinNTDE
                 collapsed = true;
                 ApplyPosition();
             }
+        }
+
+        private void SetFullscreenWindow(IntPtr window)
+        {
+            if (closed || window == fullscreenWindow) return;
+            fullscreenWindow = window;
+            if (window != IntPtr.Zero)
+            {
+                CloseButtonPopups();
+                ContextMenu.IsOpen = false;
+            }
+            else mouseInside = DateTime.UtcNow;
+            ApplyPosition();
         }
 
         private void RefreshTasks()
@@ -524,7 +543,7 @@ namespace WinNTDE
 
         private bool QueueStartMenu()
         {
-            if (closed || NativeDesktop.IsFullscreen(NativeDesktop.GetForegroundWindow(), desktop)) return false;
+            if (closed || fullscreenWindow != IntPtr.Zero) return false;
             return NativeDesktop.PostMessage(hwnd, ToggleStartMessage, IntPtr.Zero, IntPtr.Zero);
         }
 

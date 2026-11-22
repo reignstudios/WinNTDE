@@ -8,6 +8,7 @@ namespace WinNTDE
         private const uint Register = 0, Remove = 1, QueryPosition = 2, SetPosition = 3, WindowPositionChanged = 9;
         private const uint BottomEdge = 3;
         internal const int PositionChanged = 1; // ABN_POSCHANGED
+        internal const int FullscreenChanged = 2; // ABN_FULLSCREENAPP
         internal static readonly int CallbackMessage = (int)NativeDesktop.RegisterWindowMessage("WinNTDE.AppBar");
         private readonly IntPtr window;
         private readonly NotificationArea notifications;
