@@ -17,6 +17,8 @@ namespace WinNTDE
         internal bool AutoHide { get; set; }
         internal bool Thumbnails { get; set; }
         internal bool Details { get; set; }
+        internal bool StartStoreAppServices { get; set; }
+        internal long StoreAppServicesChangedBoot { get; set; }
         internal string[] PinnedApps { get; set; }
         internal event EventHandler Changed;
 
@@ -32,6 +34,10 @@ namespace WinNTDE
                 AutoHide = ReadBool(values, "AutoHide", false);
                 Thumbnails = ReadBool(values, "Thumbnails", false);
                 Details = ReadBool(values, "Details", false);
+                StartStoreAppServices = ReadBool(values, "StartStoreAppServices", false);
+                long changedBoot;
+                long.TryParse((string)values.Element("StoreAppServicesChangedBoot"), out changedBoot);
+                StoreAppServicesChangedBoot = changedBoot;
                 var pins = values.Element("PinnedApps");
                 if (pins != null) PinnedApps = pins.Elements("App").Select(app => app.Value)
                     .Where(key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -55,6 +61,8 @@ namespace WinNTDE
             new XElement("Preferences", new XElement("Wallpaper", Wallpaper ?? ""), new XElement("LightTheme", LightTheme),
                 new XElement("AlignLeft", AlignLeft), new XElement("AutoHide", AutoHide),
                 new XElement("Thumbnails", Thumbnails), new XElement("Details", Details),
+                new XElement("StartStoreAppServices", StartStoreAppServices),
+                new XElement("StoreAppServicesChangedBoot", StoreAppServicesChangedBoot),
                 PinnedApps == null ? null : new XElement("PinnedApps", PinnedApps.Select(key => new XElement("App", key)))).Save(pending);
             if (File.Exists(file)) File.Replace(pending, file, null);
             else File.Move(pending, file);

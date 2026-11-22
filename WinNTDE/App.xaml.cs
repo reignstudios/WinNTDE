@@ -20,6 +20,7 @@ namespace WinNTDE
         internal ShellPreferences Preferences { get; private set; }
         internal bool IsShell { get; private set; }
         internal WindowsUpdates Updates { get; } = new WindowsUpdates();
+        internal StoreAppSupport StoreApps { get; } = new StoreAppSupport();
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -39,6 +40,7 @@ namespace WinNTDE
             Preferences = new ShellPreferences();
             ApplyTheme();
             ShowDesktop();
+            StoreApps.Start(Preferences, IsShell, Dispatcher);
             if (e.Args.Length == 0) return;
             if (string.Equals(e.Args[0], "--settings", StringComparison.OrdinalIgnoreCase)) OpenSettings();
             else if (e.Args.Length == 2 && string.Equals(e.Args[0], "--explore", StringComparison.OrdinalIgnoreCase))

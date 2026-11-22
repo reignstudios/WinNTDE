@@ -19,13 +19,13 @@ namespace WinNTDE
     internal sealed class SettingsWindow : Window
     {
         private static readonly string[] Pages =
-            { "Personalization", "Taskbar", "Display", "Audio", "Power", "Installed Apps", "Windows Update", "Wi-Fi", "Bluetooth", "About" };
+            { "Personalization", "Taskbar", "Display", "Audio", "Power", "Installed Apps", "Store Apps", "Windows Update", "Wi-Fi", "Bluetooth", "About" };
 
         private readonly App app;
         private readonly ListBox pages = new ListBox();
         private readonly ScrollViewer body = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         private StackPanel content;
-        private Action refreshUpdates;
+        private Action refreshUpdates, refreshStoreApps;
         private int pageVersion;
 
         internal SettingsWindow(App app)
@@ -55,11 +55,14 @@ namespace WinNTDE
             sidebar.Children.Add(pages);
             root.Children.Add(body);
             EventHandler updateChanged = (s, e) => refreshUpdates?.Invoke();
+            EventHandler storeAppsChanged = (s, e) => refreshStoreApps?.Invoke();
             app.Updates.Changed += updateChanged;
+            app.StoreApps.Changed += storeAppsChanged;
             Closed += (s, e) =>
             {
                 pageVersion++;
                 app.Updates.Changed -= updateChanged;
+                app.StoreApps.Changed -= storeAppsChanged;
             };
             SelectPage("Personalization");
         }
@@ -75,6 +78,7 @@ namespace WinNTDE
             if (page == null) return;
             pageVersion++;
             refreshUpdates = null;
+            refreshStoreApps = null;
             content = new StackPanel { Margin = new Thickness(24, 17, 24, 20) };
             body.Content = content;
             body.ScrollToTop();
@@ -88,6 +92,7 @@ namespace WinNTDE
                 case "Audio": Audio(); break;
                 case "Power": Power(); break;
                 case "Installed Apps": InstalledApps(); break;
+                case "Store Apps": StoreApps(); break;
                 case "Windows Update": WindowsUpdate(); break;
                 case "Wi-Fi": Wifi(); break;
                 case "Bluetooth": Bluetooth(); break;
@@ -217,6 +222,36 @@ namespace WinNTDE
                 Margin = new Thickness(0, 4, 0, 10) };
             autoHide.Click += (s, e) => { app.Preferences.AutoHide = autoHide.IsChecked == true; app.SavePreferences(this); };
             content.Children.Add(autoHide);
+        }
+
+        private void StoreApps()
+        {
+            if (!StoreAppSupport.IsSupported)
+            {
+                AddText("Store app services require Windows 8 or later.");
+                return;
+            }
+
+            var enable = new CheckBox
+            {
+                Content = "Start Store app services",
+                IsChecked = app.Preferences.StartStoreAppServices,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            content.Children.Add(enable);
+            AddText("Experimental support for Store apps without Explorer. Some apps require additional Windows shell components.");
+            var restart = AddText("Restart Windows to apply changes.");
+            var status = AddStatus();
+            refreshStoreApps = () => status.Text = app.StoreApps.Status ?? "";
+            refreshStoreApps();
+            enable.Click += (s, e) =>
+            {
+                if (DesktopFiles.Try(this, () => StoreAppSupport.SaveSetting(app.Preferences, enable.IsChecked == true)))
+                    restart.Text = app.Preferences.StoreAppServicesChangedBoot == 0
+                        ? "Pending change canceled." : "Restart Windows to apply this change.";
+                else
+                    enable.IsChecked = app.Preferences.StartStoreAppServices;
+            };
         }
 
         private void Display()
