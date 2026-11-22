@@ -82,7 +82,19 @@ namespace WinNTDE
             AddPlace(side, added, "Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos));
             AddPlace(side, added, "Home", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
             AddPlace(side, added, RecycleBin.DisplayName, RecycleBin.Location, false);
-            foreach (var drive in DriveInfo.GetDrives()) AddPlace(side, added, drive.Name, drive.Name, false);
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                string path = drive.Name;
+                var button = AddPlace(side, added, path, path, false);
+                if (button == null) continue;
+                button.PreviewMouseRightButtonUp += (s, e) =>
+                {
+                    e.Handled = true;
+                    if (!ShellFileMenu.Show(this, new[] { path }, () => Navigate(path)))
+                        MessageBox.Show(this, "Windows could not open the system menu for " + path + ".", "Drive menu",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                };
+            }
 
             DockPanel.SetDock(status, Dock.Bottom);
             status.SetResourceReference(ForegroundProperty, "Muted");
@@ -138,12 +150,13 @@ namespace WinNTDE
             return button;
         }
 
-        private void AddPlace(StackPanel side, HashSet<string> added, string title, string path, bool check = true)
+        private Button AddPlace(StackPanel side, HashSet<string> added, string title, string path, bool check = true)
         {
-            if (string.IsNullOrEmpty(path) || (check && !Directory.Exists(path)) || !added.Add(path)) return;
+            if (string.IsNullOrEmpty(path) || (check && !Directory.Exists(path)) || !added.Add(path)) return null;
             var button = new Button { Content = title, ToolTip = path, Margin = new Thickness(0, 0, 0, 4) };
             button.Click += (s, e) => Navigate(path);
             side.Children.Add(button);
+            return button;
         }
 
         private void PreferencesChanged(object sender, EventArgs e)
