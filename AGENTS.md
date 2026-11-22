@@ -47,3 +47,8 @@
 - Feature: WiFi settings page
 - Feature: BT settings page
 - Feature: Taskbar settings for icon alignment to left or center (defaults to center) and auto-hide option
+
+# WinNTDE Volume Window
+- Volume WPF Window pops open when you hit volume up/down buttons
+- Volume Window has a bar showing volume level when changed
+- Volume Window closes 3 seconds after it shows you volume level

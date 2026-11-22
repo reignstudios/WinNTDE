@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -20,6 +21,7 @@ namespace WinNTDE
     {
         private const int BarHeight = 43;
         private const int ToggleStartMessage = 0x8001; // WM_APP + 1
+        private const int ChangeVolumeMessage = 0x8002;
         private readonly App app;
         private readonly Grid bar = new Grid();
         private readonly StackPanel group = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -35,8 +37,9 @@ namespace WinNTDE
         private readonly DispatcherTimer edgeRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(150) };
         private readonly Dictionary<IntPtr, TaskItem> windows = new Dictionary<IntPtr, TaskItem>();
         private NotificationArea notifications;
-        private StartKeyHook startKey;
+        private ShellKeyHook shellKeys;
         private StartMenuWindow startMenu;
+        private VolumeWindow volumeWindow;
         private ContextMenu openMenu;
         private NativeDesktop.Rect previousWork, lastScreen, bounds;
         private IntPtr hwnd, desktop, activeApp;
@@ -132,7 +135,7 @@ namespace WinNTDE
                 taskRefresh.Stop();
                 edgeRefresh.Stop();
                 app.Preferences.Changed -= PreferencesChanged;
-                if (startKey != null) startKey.Dispose();
+                if (shellKeys != null) shellKeys.Dispose();
                 if (notifications != null) notifications.Dispose();
                 if (workAreaChanged)
                 {
@@ -160,8 +163,8 @@ namespace WinNTDE
             mouseInside = DateTime.UtcNow;
             ApplyPosition(true);
             RefreshTasks();
-            try { startKey = new StartKeyHook(QueueStartMenu); }
-            catch (Win32Exception error) { Trace.TraceWarning("Could not register the Windows key: {0}", error.Message); }
+            try { shellKeys = new ShellKeyHook(QueueStartMenu, QueueVolumeChange); }
+            catch (Win32Exception error) { Trace.TraceWarning("Could not register shell keys: {0}", error.Message); }
             taskRefresh.Start();
             edgeRefresh.Start();
         }
@@ -172,6 +175,12 @@ namespace WinNTDE
             {
                 handled = true;
                 if (!closed) ToggleStartMenu();
+                return IntPtr.Zero;
+            }
+            if (message == ChangeVolumeMessage)
+            {
+                handled = true;
+                if (!closed) ChangeVolume(wParam.ToInt32());
                 return IntPtr.Zero;
             }
             if (message == NativeDesktop.DisplayChanged || message == 0x02E0)
@@ -228,6 +237,7 @@ namespace WinNTDE
             NativeDesktop.SetWindowPos(hwnd, fullscreen ? NativeDesktop.NotTopmost : NativeDesktop.Topmost,
                 area.Left, top, area.Width, collapsed ? 2 : height, 0x0010);
             if (startMenu != null && startMenu.IsVisible) startMenu.Position(bounds, area.Top);
+            if (volumeWindow != null) volumeWindow.Position(bounds, area.Top);
             if (adjustWorkArea && app.IsShell)
             {
                 var desired = app.Preferences.AutoHide ? screen : bounds;
@@ -475,6 +485,24 @@ namespace WinNTDE
         {
             if (closed || NativeDesktop.IsFullscreen(NativeDesktop.GetForegroundWindow(), desktop)) return false;
             return NativeDesktop.PostMessage(hwnd, ToggleStartMessage, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        private bool QueueVolumeChange(int percentagePoints)
+        {
+            return !closed && NativeDesktop.PostMessage(hwnd, ChangeVolumeMessage, new IntPtr(percentagePoints), IntPtr.Zero);
+        }
+
+        private void ChangeVolume(int percentagePoints)
+        {
+            float? level = null;
+            try { level = AudioDevices.AdjustVolume(percentagePoints); }
+            catch (ExternalException error) { Trace.TraceWarning("Could not change the output volume: {0}", error.Message); }
+            if (volumeWindow == null)
+            {
+                volumeWindow = new VolumeWindow { Owner = this };
+                volumeWindow.Closed += (s, e) => volumeWindow = null;
+            }
+            volumeWindow.ShowLevel(level, bounds, NativeDesktop.WorkArea.Top);
         }
 
         private void ToggleStartMenu()

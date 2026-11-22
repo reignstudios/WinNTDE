@@ -4,21 +4,24 @@ using System.Runtime.InteropServices;
 
 namespace WinNTDE
 {
-    internal sealed class StartKeyHook : IDisposable
+    internal sealed class ShellKeyHook : IDisposable
     {
         private const int KeyboardLowLevel = 13;
         private const int LeftWindowsKey = 0x5B, RightWindowsKey = 0x5C;
+        private const int VolumeDownKey = 0xAE, VolumeUpKey = 0xAF;
         private const int KeyReleased = 0x80; // LLKHF_UP
         private const byte MenuMaskKey = 0xE8; // Unassigned virtual key.
         private readonly Func<bool> queueStartMenu;
+        private readonly Func<int, bool> queueVolumeChange;
         private readonly KeyboardProc callback;
         private IntPtr hook;
         private int heldWindowsKeys;
         private bool standalone;
 
-        internal StartKeyHook(Func<bool> queueStartMenu)
+        internal ShellKeyHook(Func<bool> queueStartMenu, Func<int, bool> queueVolumeChange)
         {
             this.queueStartMenu = queueStartMenu;
+            this.queueVolumeChange = queueVolumeChange;
             callback = HandleKey;
             hook = SetWindowsHookEx(KeyboardLowLevel, callback, GetModuleHandle(null), 0);
             if (hook == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -29,10 +32,15 @@ namespace WinNTDE
             if (code == 0) // HC_ACTION
             {
                 int key = Marshal.ReadInt32(data); // KBDLLHOOKSTRUCT.vkCode
+                if (key == VolumeUpKey || key == VolumeDownKey)
+                {
+                    standalone = false;
+                    // Claim the press so Explorer doesn't also apply its own volume step.
+                    if (IsReleased(data) || queueVolumeChange(key == VolumeUpKey ? 5 : -5)) return new IntPtr(1);
+                }
                 if (heldWindowsKeys != 0 || key == LeftWindowsKey || key == RightWindowsKey)
                 {
-                    bool released = (Marshal.ReadInt32(data, 8) & KeyReleased) != 0; // KBDLLHOOKSTRUCT.flags
-                    if (IsStandaloneRelease(key, released) && queueStartMenu())
+                    if (IsStandaloneRelease(key, IsReleased(data)) && queueStartMenu())
                     {
                         // Mask Explorer's Start gesture before passing through the real key-up.
                         // Both Windows-key events still reach the system, so shortcuts stay intact.
@@ -42,6 +50,11 @@ namespace WinNTDE
                 }
             }
             return CallNextHookEx(hook, code, message, data);
+        }
+
+        private static bool IsReleased(IntPtr data)
+        {
+            return (Marshal.ReadInt32(data, 8) & KeyReleased) != 0; // KBDLLHOOKSTRUCT.flags
         }
 
         private bool IsStandaloneRelease(int key, bool released)

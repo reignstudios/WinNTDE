@@ -101,25 +101,39 @@ namespace WinNTDE
 
         internal static float Volume()
         {
-            if (SystemSettings.WindowsVersion.Major < 6)
-            {
-                uint stereo;
-                SystemSettings.Check(waveOutGetVolume(new IntPtr(-1), out stereo));
-                return ((stereo & 0xFFFF) + (stereo >> 16)) / 131070.0f;
-            }
-            float level = 0;
-            WithDefaultVolume(volume => level = volume.GetMasterVolumeLevelScalar());
-            return level;
+            return UpdateVolume(null);
         }
 
         internal static void SetVolume(float level)
         {
-            if (SystemSettings.WindowsVersion.Major < 6)
-            {
-                uint channel = (uint)Math.Round(level * 65535);
-                SystemSettings.Check(waveOutSetVolume(new IntPtr(-1), channel | (channel << 16)));
-            }
+            if (SystemSettings.WindowsVersion.Major < 6) LegacyVolume.ReadOrUpdate(current => level);
             else WithDefaultVolume(volume => volume.SetMasterVolumeLevelScalar(level, IntPtr.Zero));
+        }
+
+        internal static float AdjustVolume(int percentagePoints)
+        {
+            return UpdateVolume(current => OffsetVolume(current, percentagePoints));
+        }
+
+        private static float OffsetVolume(float current, int percentagePoints)
+        {
+            return Math.Max(0f, Math.Min(1f, current + percentagePoints / 100f));
+        }
+
+        private static float UpdateVolume(Func<float, float> change)
+        {
+            if (SystemSettings.WindowsVersion.Major < 6) return LegacyVolume.ReadOrUpdate(change);
+            float level = 0;
+            WithDefaultVolume(volume =>
+            {
+                level = volume.GetMasterVolumeLevelScalar();
+                if (change == null) return;
+                float target = change(level);
+                if (target == level) return;
+                volume.SetMasterVolumeLevelScalar(target, IntPtr.Zero);
+                level = volume.GetMasterVolumeLevelScalar();
+            });
+            return level;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -133,8 +147,6 @@ namespace WinNTDE
         }
 
         [DllImport("ole32.dll")] private static extern int PropVariantClear(ref Variant variant);
-        [DllImport("winmm.dll")] private static extern uint waveOutGetVolume(IntPtr device, out uint stereo);
-        [DllImport("winmm.dll")] private static extern uint waveOutSetVolume(IntPtr device, uint stereo);
 
         [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         private interface IEndpointEnumerator
