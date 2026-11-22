@@ -172,7 +172,7 @@ namespace WinNTDE
         private void Launch(StartApp entry)
         {
             Dismiss();
-            DesktopFiles.Try(Owner ?? this, entry.Launch);
+            DesktopFiles.LaunchAsync(Owner ?? this, entry.Launch);
         }
 
         private void OpenPinMenu(object sender, RoutedEventArgs e)

@@ -276,7 +276,8 @@ namespace WinNTDE
 
         internal static void OpenControl(string panel)
         {
-            Process.Start(Path.Combine(Environment.SystemDirectory, "control.exe"), panel);
+            using (Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "control.exe"), panel)
+                { UseShellExecute = false })) { }
         }
 
         internal static void OpenManagementConsole(string snapIn)

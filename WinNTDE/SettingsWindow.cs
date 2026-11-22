@@ -294,7 +294,7 @@ namespace WinNTDE
             var hdr = AddActions();
             hdr.Margin = new Thickness(0, 8, 0, 0);
             hdr.IsEnabled = SystemSettings.WindowsVersion.Major >= 10;
-            hdr.Children.Add(MakeButton("Auto HDR Calibrate", () => DesktopFiles.Try(this, () =>
+            hdr.Children.Add(MakeButton("Auto HDR Calibrate", () => DesktopFiles.LaunchAsync(this, () =>
             {
                 string directory = AppDomain.CurrentDomain.BaseDirectory;
                 var start = new ProcessStartInfo(Path.Combine(directory, "AutoHDR.exe"))
@@ -374,7 +374,7 @@ namespace WinNTDE
                 volume.Value = Math.Round(value * 100);
                 volume.IsEnabled = apply.IsEnabled = true;
             });
-            AddButton("Windows sound settings", () => DesktopFiles.Try(this, () => SystemSettings.OpenControl("mmsys.cpl")));
+            AddButton("Windows sound settings", () => DesktopFiles.LaunchAsync(this, () => SystemSettings.OpenControl("mmsys.cpl")));
         }
 
         private void Power()
@@ -395,7 +395,7 @@ namespace WinNTDE
                     };
                 });
             }
-            AddButton("Windows power options", () => DesktopFiles.Try(this, () => SystemSettings.OpenControl("powercfg.cpl")));
+            AddButton("Windows power options", () => DesktopFiles.LaunchAsync(this, () => SystemSettings.OpenControl("powercfg.cpl")));
             var actions = AddActions();
             foreach (var pair in new[] { new { Label = "Sleep", Option = "" }, new { Label = "Sign out", Option = "l" },
                 new { Label = "Restart", Option = "r" }, new { Label = "Shut down", Option = "s" } })
@@ -424,9 +424,10 @@ namespace WinNTDE
             actions.Children.Add(uninstall);
             var refresh = MakeButton("Refresh", null);
             actions.Children.Add(refresh);
-            actions.Children.Add(MakeButton("Windows installed apps", () => DesktopFiles.Try(this, () =>
+            actions.Children.Add(MakeButton("Windows installed apps", () => DesktopFiles.LaunchAsync(this, () =>
             {
-                if (SystemSettings.WindowsVersion.Major >= 10) Process.Start("ms-settings:appsfeatures");
+                if (SystemSettings.WindowsVersion.Major >= 10)
+                    using (Process.Start("ms-settings:appsfeatures")) { }
                 else SystemSettings.OpenControl("appwiz.cpl");
             })));
             var entries = new SystemSettings.InstalledApp[0];
@@ -555,11 +556,8 @@ namespace WinNTDE
             actions.Children.Add(connect);
             actions.Children.Add(disconnect);
             actions.Children.Add(scan);
-            actions.Children.Add(MakeButton("Windows network settings", () => DesktopFiles.Try(this, () =>
-            {
-                if (SystemSettings.WindowsVersion.Major >= 10) Process.Start("ms-settings:network-wifi");
-                else SystemSettings.OpenControl("ncpa.cpl");
-            })));
+            actions.Children.Add(MakeButton("Windows network settings",
+                () => DesktopFiles.LaunchAsync(this, () => SystemSettings.OpenControl("ncpa.cpl"))));
             var status = AddStatus();
             bool busy = false;
             Action updateButtons = () =>
@@ -647,9 +645,10 @@ namespace WinNTDE
             var row = AddActions();
             var scan = MakeButton("Scan nearby devices", null);
             row.Children.Add(scan);
-            row.Children.Add(MakeButton("Pair or manage devices in Windows", () => DesktopFiles.Try(this, () =>
+            row.Children.Add(MakeButton("Pair or manage devices in Windows", () => DesktopFiles.LaunchAsync(this, () =>
             {
-                if (SystemSettings.WindowsVersion.Major >= 10) Process.Start("ms-settings:bluetooth");
+                if (SystemSettings.WindowsVersion.Major >= 10)
+                    using (Process.Start("ms-settings:bluetooth")) { }
                 else if (SystemSettings.WindowsVersion >= new Version(6, 1)) SystemSettings.OpenControl("/name Microsoft.DevicesAndPrinters");
                 else SystemSettings.OpenControl("bthprops.cpl");
             })));

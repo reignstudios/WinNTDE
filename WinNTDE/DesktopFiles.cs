@@ -195,8 +195,16 @@ namespace WinNTDE
         internal static void OpenPath(string path, bool isFolder = false)
         {
             string folder = isFolder ? path : LinkedFolder(path);
-            if (folder != null) ((App)Application.Current).OpenExplorer(folder);
-            else Process.Start(new ProcessStartInfo(path) { WorkingDirectory = Path.GetDirectoryName(path) });
+            if (folder == null)
+            {
+                using (Process.Start(new ProcessStartInfo(path) { WorkingDirectory = Path.GetDirectoryName(path) })) { }
+                return;
+            }
+
+            var app = (App)Application.Current;
+            if (app == null || app.Dispatcher.HasShutdownStarted) return;
+            if (app.Dispatcher.CheckAccess()) app.OpenExplorer(folder);
+            else app.Dispatcher.BeginInvoke(new Action(() => Try(app.MainWindow, () => app.OpenExplorer(folder))));
         }
 
         private static string LinkedFolder(string path)
@@ -229,14 +237,45 @@ namespace WinNTDE
                 action();
                 return true;
             }
-            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException ||
-                error is Win32Exception || error is ExternalException || error is ArgumentException ||
-                error is InvalidOperationException || error is NotSupportedException || error is InvalidCastException ||
-                error is System.Security.SecurityException)
+            catch (Exception error) when (IsOperationError(error))
             {
-                MessageBox.Show(owner, error.Message, owner.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+                ShowOperationError(owner, error.Message);
                 return false;
             }
+        }
+
+        internal static void LaunchAsync(Window owner, Action launch)
+        {
+            var dispatcher = owner.Dispatcher;
+            var ownerReference = new WeakReference(owner);
+            // Shell activation can block. Give each launch its own COM apartment.
+            var worker = new Thread(() =>
+            {
+                try { launch(); }
+                catch (Exception error) when (IsOperationError(error))
+                {
+                    if (dispatcher.HasShutdownStarted) return;
+                    dispatcher.BeginInvoke(new Action(() => ShowOperationError(ownerReference.Target as Window, error.Message)));
+                }
+            }) { IsBackground = true };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+        }
+
+        private static bool IsOperationError(Exception error)
+        {
+            return error is IOException || error is UnauthorizedAccessException ||
+                error is Win32Exception || error is ExternalException || error is ArgumentException ||
+                error is InvalidOperationException || error is NotSupportedException || error is InvalidCastException ||
+                error is System.Security.SecurityException;
+        }
+
+        private static void ShowOperationError(Window owner, string message)
+        {
+            if (owner != null && owner.IsVisible)
+                MessageBox.Show(owner, message, owner.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            else
+                MessageBox.Show(message, "WinNTDE", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         internal static void PutOnClipboard(IEnumerable<FileEntry> items, bool move)
