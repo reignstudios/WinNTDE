@@ -19,6 +19,7 @@ namespace WinNTDE
     internal sealed class TaskbarWindow : Window
     {
         private const int BarHeight = 43;
+        private const int ToggleStartMessage = 0x8001; // WM_APP + 1
         private readonly App app;
         private readonly Grid bar = new Grid();
         private readonly StackPanel group = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -34,6 +35,7 @@ namespace WinNTDE
         private readonly DispatcherTimer edgeRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(150) };
         private readonly Dictionary<IntPtr, TaskItem> windows = new Dictionary<IntPtr, TaskItem>();
         private NotificationArea notifications;
+        private StartKeyHook startKey;
         private StartMenuWindow startMenu;
         private ContextMenu openMenu;
         private NativeDesktop.Rect previousWork, lastScreen, bounds;
@@ -130,6 +132,7 @@ namespace WinNTDE
                 taskRefresh.Stop();
                 edgeRefresh.Stop();
                 app.Preferences.Changed -= PreferencesChanged;
+                if (startKey != null) startKey.Dispose();
                 if (notifications != null) notifications.Dispose();
                 if (workAreaChanged)
                 {
@@ -157,12 +160,20 @@ namespace WinNTDE
             mouseInside = DateTime.UtcNow;
             ApplyPosition(true);
             RefreshTasks();
+            try { startKey = new StartKeyHook(QueueStartMenu); }
+            catch (Win32Exception error) { Trace.TraceWarning("Could not register the Windows key: {0}", error.Message); }
             taskRefresh.Start();
             edgeRefresh.Start();
         }
 
         private IntPtr HandleMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (message == ToggleStartMessage)
+            {
+                handled = true;
+                if (!closed) ToggleStartMenu();
+                return IntPtr.Zero;
+            }
             if (message == NativeDesktop.DisplayChanged || message == 0x02E0)
                 Dispatcher.BeginInvoke(new Action(() => ApplyPosition(true)));
             if (message == 0x0219 && mediaPopup.IsOpen) // WM_DEVICECHANGE
@@ -460,6 +471,12 @@ namespace WinNTDE
             }
         }
 
+        private bool QueueStartMenu()
+        {
+            if (closed || NativeDesktop.IsFullscreen(NativeDesktop.GetForegroundWindow(), desktop)) return false;
+            return NativeDesktop.PostMessage(hwnd, ToggleStartMessage, IntPtr.Zero, IntPtr.Zero);
+        }
+
         private void ToggleStartMenu()
         {
             if (startMenu != null && startMenu.IsVisible)
@@ -467,8 +484,15 @@ namespace WinNTDE
                 startMenu.Dismiss();
                 return;
             }
+            if (collapsed)
+            {
+                collapsed = false;
+                mouseInside = DateTime.UtcNow;
+                ApplyPosition(false);
+            }
             tray.IsOpen = mediaPopup.IsOpen = false;
             if (openMenu != null) openMenu.IsOpen = false;
+            ContextMenu.IsOpen = false;
             if (startMenu == null)
             {
                 startMenu = new StartMenuWindow(app, OpenRun) { Owner = this };

@@ -90,6 +90,7 @@
     <Compile Include="ShellFileMenu.cs" />
     <Compile Include="ShellPreferences.cs" />
     <Compile Include="StartAppCatalog.cs" />
+    <Compile Include="StartKeyHook.cs" />
     <Compile Include="StartMenuWindow.xaml.cs">
       <DependentUpon>StartMenuWindow.xaml</DependentUpon>
     </Compile>
