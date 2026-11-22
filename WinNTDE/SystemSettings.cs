@@ -276,6 +276,40 @@ namespace WinNTDE
             Process.Start(Path.Combine(Environment.SystemDirectory, "control.exe"), panel);
         }
 
+        internal static void OpenManagementConsole(string snapIn)
+        {
+            string console = Path.Combine(Environment.SystemDirectory, "mmc.exe");
+            string path = Path.Combine(Environment.SystemDirectory, snapIn);
+            using (Process.Start(new ProcessStartInfo(console, "\"" + path + "\"") { UseShellExecute = true })) { }
+        }
+
+        internal static void OpenTerminal(bool elevated)
+        {
+            const int Cancelled = 1223;
+            try
+            {
+                if (WindowsVersion.Major >= 10)
+                {
+                    var terminal = new FileInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        @"Microsoft\WindowsApps\wt.exe"));
+                    if (terminal.Exists && (terminal.Attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        try { StartTerminal(terminal.FullName, elevated); return; }
+                        catch (Win32Exception error) when (error.NativeErrorCode != Cancelled) { }
+                    }
+                }
+                StartTerminal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), elevated);
+            }
+            catch (Win32Exception error) when (error.NativeErrorCode == Cancelled) { }
+        }
+
+        private static void StartTerminal(string executable, bool elevated)
+        {
+            var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = elevated ? "runas" : "open",
+                WorkingDirectory = elevated ? Environment.SystemDirectory : DesktopFiles.Home };
+            using (Process.Start(start)) { }
+        }
+
         internal static void Release(object value)
         {
             if (value != null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);

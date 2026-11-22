@@ -66,6 +66,13 @@ namespace WinNTDE
             var logo = BitmapFrame.Create(new Uri("pack://application:,,,/WinNTDE;component/LogoIcon.ico"));
             var menuButton = IconButton(logo, "Start");
             menuButton.Click += (s, e) => ToggleStartMenu();
+            var startCommands = CreateButtonMenu(menuButton);
+            App.AddMenuItem(startCommands, "Device Manager", () => DesktopFiles.Try(this, () => SystemSettings.OpenManagementConsole("devmgmt.msc")));
+            App.AddMenuItem(startCommands, "Disk Manager", () => DesktopFiles.Try(this, () => SystemSettings.OpenManagementConsole("diskmgmt.msc")));
+            App.AddMenuItem(startCommands, "Terminal", () => DesktopFiles.Try(this, () => SystemSettings.OpenTerminal(false)));
+            App.AddMenuItem(startCommands, "Terminal (Admin)", () => DesktopFiles.Try(this, () => SystemSettings.OpenTerminal(true)));
+            menuButton.ContextMenu = startCommands;
+            menuButton.ContextMenuOpening += (s, e) => CloseButtonPopups();
             group.Children.Add(menuButton);
             var explorer = IconButton(DesktopFiles.FolderIcon, "File Explorer");
             explorer.Click += (s, e) =>
@@ -536,21 +543,28 @@ namespace WinNTDE
 
         private void OpenClock()
         {
-            var menu = App.Menu();
+            CloseButtonPopups();
+            var menu = CreateButtonMenu(clock);
             menu.Items.Add(new MenuItem { Header = DateTime.Now.ToLongDateString(), IsEnabled = false });
             App.AddMenuItem(menu, "Date and time settings", () => DesktopFiles.Try(this, () => SystemSettings.OpenControl("timedate.cpl")));
-            OpenMenu(menu, clock);
+            menu.IsOpen = true;
         }
 
-        private void OpenMenu(ContextMenu menu, Button button)
+        private ContextMenu CreateButtonMenu(Button button)
+        {
+            var menu = App.Menu();
+            menu.PlacementTarget = button;
+            menu.Placement = PlacementMode.Top;
+            menu.Opened += (s, e) => openMenu = menu;
+            menu.Closed += (s, e) => { if (openMenu == menu) openMenu = null; };
+            return menu;
+        }
+
+        private void CloseButtonPopups()
         {
             DismissStartMenu();
             tray.IsOpen = mediaPopup.IsOpen = false;
-            openMenu = menu;
-            menu.Closed += (s, e) => { if (openMenu == menu) openMenu = null; };
-            menu.PlacementTarget = button;
-            menu.Placement = PlacementMode.Top;
-            menu.IsOpen = true;
+            if (openMenu != null) openMenu.IsOpen = false;
         }
 
         private void OpenRun()
