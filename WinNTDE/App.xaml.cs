@@ -11,6 +11,7 @@ namespace WinNTDE
         private Mutex instance;
         private bool ownsInstance;
         private SettingsWindow settings;
+        private TaskManagerWindow taskManager;
         private ResourceDictionary darkControls;
 
         internal ShellPreferences Preferences { get; private set; }
@@ -102,6 +103,18 @@ namespace WinNTDE
             if (page != null) settings.SelectPage(page);
             if (settings.WindowState == WindowState.Minimized) settings.WindowState = WindowState.Normal;
             settings.Activate();
+        }
+
+        internal void OpenTaskManager()
+        {
+            if (taskManager == null)
+            {
+                taskManager = new TaskManagerWindow();
+                taskManager.Closed += (s, e) => taskManager = null;
+                taskManager.Show();
+            }
+            if (taskManager.WindowState == WindowState.Minimized) taskManager.WindowState = WindowState.Normal;
+            taskManager.Activate();
         }
 
         internal static ContextMenu Menu()

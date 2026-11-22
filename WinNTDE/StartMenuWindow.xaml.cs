@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -254,7 +253,7 @@ namespace WinNTDE
         private void OpenTaskManager(object sender, RoutedEventArgs e)
         {
             Dismiss();
-            DesktopFiles.Try(Owner ?? this, () => Process.Start("taskmgr.exe"));
+            app.OpenTaskManager();
         }
 
         private void ExitDesktop(object sender, RoutedEventArgs e)

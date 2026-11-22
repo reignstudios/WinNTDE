@@ -190,6 +190,8 @@ namespace WinNTDE
             return process;
         }
 
+        internal static IntPtr RootWindowOwner(IntPtr hwnd) { return GetAncestor(hwnd, 3); } // GA_ROOTOWNER
+
         internal static string WindowTitle(IntPtr hwnd)
         {
             var text = new StringBuilder(512);

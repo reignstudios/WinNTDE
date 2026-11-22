@@ -71,6 +71,10 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="TaskManagerWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="VolumeWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -102,6 +106,10 @@
     <Compile Include="SystemSettings.cs" />
     <Compile Include="TaskbarAppBar.cs" />
     <Compile Include="TaskbarWindow.cs" />
+    <Compile Include="TaskManagerData.cs" />
+    <Compile Include="TaskManagerWindow.xaml.cs">
+      <DependentUpon>TaskManagerWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="VolumeWindow.xaml.cs">
       <DependentUpon>VolumeWindow.xaml</DependentUpon>
     </Compile>

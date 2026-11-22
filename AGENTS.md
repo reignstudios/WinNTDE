@@ -54,3 +54,14 @@
 - Volume Window has a bar showing volume level when changed
 - Volume Window closes 3 seconds after it shows you volume level
 - When volume is changed, system volume beep is played
+
+# WinNTDE Task Manager
+- TaskManager is a WPF Window
+- Feature: CPU Usage as sinlge number from 0-100%
+- Feature: Ram Usage as single number from 0-TotalRam value
+- Feature: Process list. Windowed processes are grouped under the window owner just like Win11 TaskManager does
+- Feature: Windowed processes can be expanded to show sub-processes
+- Feature: "End Task" button will force quit process or windowed process tree for selected items (multiple can be selected at once)
+- Feature: "Refresh" button lets user manually refresh the process list if auto-refresh is off.
+- Feature: Auto-Refresh is off by default but when Window opens it refreshes once.
+- Feature: If Auto-Refresh is on, it refreshes every 5 seconds.
