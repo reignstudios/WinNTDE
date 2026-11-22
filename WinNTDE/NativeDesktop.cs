@@ -247,8 +247,19 @@ namespace WinNTDE
             window.SetResourceReference(FrameworkElement.StyleProperty, "ShellWindow");
             window.SourceInitialized += (s, e) => UpdateTitleBar(window, ((App)Application.Current).Preferences.LightTheme);
             Rect work = WorkArea;
-            window.MaxWidth = work.Width / ChromeScale;
-            window.MaxHeight = work.Height / ChromeScale;
+            double scale = ChromeScale;
+            double width = work.Width / scale, height = work.Height / scale;
+            if (window.ResizeMode == ResizeMode.CanResize || window.ResizeMode == ResizeMode.CanResizeWithGrip)
+            {
+                // Keep the initial size on screen and let Windows include the resize frame when maximizing.
+                if (window.Width > width) window.Width = width;
+                if (window.Height > height) window.Height = height;
+            }
+            else
+            {
+                window.MaxWidth = width;
+                window.MaxHeight = height;
+            }
             window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
 
