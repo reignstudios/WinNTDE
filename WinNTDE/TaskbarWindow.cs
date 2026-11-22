@@ -11,6 +11,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace WinNTDE
@@ -57,7 +58,8 @@ namespace WinNTDE
             Content = frame;
 
             bar.Children.Add(group);
-            var menuButton = IconButton("▦", "Start");
+            var logo = BitmapFrame.Create(new Uri("pack://application:,,,/WinNTDE;component/LogoIcon.ico"));
+            var menuButton = IconButton(logo, "Start");
             menuButton.Click += (s, e) => ToggleStartMenu();
             group.Children.Add(menuButton);
             var explorer = IconButton(DesktopFiles.FolderIcon, "File Explorer");
