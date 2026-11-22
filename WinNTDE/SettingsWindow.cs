@@ -512,6 +512,9 @@ namespace WinNTDE
 
         private void Wifi()
         {
+            var wifi = new CheckBox { Content = "Wi-Fi", HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 0, 10) };
+            content.Children.Add(wifi);
             var list = new ListBox { Height = 195, Margin = new Thickness(0, 0, 0, 10) };
             content.Children.Add(list);
             var actions = AddActions();
@@ -524,24 +527,61 @@ namespace WinNTDE
             actions.Children.Add(MakeButton("Windows network settings",
                 () => DesktopFiles.LaunchAsync(this, () => SystemSettings.OpenControl("ncpa.cpl"))));
             var status = AddStatus();
+            Wireless.WifiRadioState? radioState = null;
             bool busy = false;
             Action updateButtons = () =>
             {
                 var network = list.SelectedItem as Wireless.Network;
+                wifi.IsEnabled = !busy && (radioState == Wireless.WifiRadioState.On || radioState == Wireless.WifiRadioState.Off);
+                scan.IsEnabled = !busy;
                 connect.IsEnabled = !busy && network != null && !network.Connected && network.Connectable &&
                     (!string.IsNullOrEmpty(network.Profile) || (network.CanCreateProfile && network.BssType == 1));
                 disconnect.IsEnabled = !busy && network != null && network.Connected;
             };
             list.SelectionChanged += (s, e) => updateButtons();
             Action<bool> setBusy = value => { busy = value; updateButtons(); };
-            Action<bool> refresh = shouldScan =>
+            Action<bool, bool?> refresh = (shouldScan, enabled) =>
             {
                 setBusy(true);
-                Run(scan, status, "Reading Wi-Fi networks…", () => Wireless.Networks(shouldScan), networks =>
+                string working = enabled.HasValue ? (enabled.Value ? "Turning on Wi-Fi…" : "Turning off Wi-Fi…") : "Reading Wi-Fi networks…";
+                Run(null, status, working, () =>
                 {
-                    list.ItemsSource = networks;
-                    if (networks.Length == 0) status.Text = "No Wi-Fi networks found.";
-                }, () => setBusy(false));
+                    string message = null;
+                    if (enabled.HasValue)
+                    {
+                        try { Wireless.SetRadioEnabled(enabled.Value); }
+                        catch (Win32Exception failure) { message = failure.Message; }
+                    }
+
+                    var state = Wireless.GetRadioState();
+                    Wireless.Network[] networks = null;
+                    if (state == Wireless.WifiRadioState.On || state == Wireless.WifiRadioState.Unsupported)
+                    {
+                        try { networks = Wireless.Networks(shouldScan); }
+                        catch (Win32Exception failure) { if (message == null) message = failure.Message; }
+                    }
+                    else networks = new Wireless.Network[0];
+
+                    if (message == null)
+                    {
+                        if (state == Wireless.WifiRadioState.NoAdapter) message = "No Wi-Fi adapter is available.";
+                        else if (state == Wireless.WifiRadioState.HardwareOff) message = "Wi-Fi is disabled by the hardware radio switch.";
+                        else if (enabled.HasValue && enabled.Value != (state == Wireless.WifiRadioState.On))
+                            message = "Windows has not confirmed the Wi-Fi change.";
+                        else if (state == Wireless.WifiRadioState.Off) message = "Wi-Fi is off.";
+                        else if (networks != null && networks.Length == 0) message = "No Wi-Fi networks found.";
+                    }
+                    return Tuple.Create(state, networks, message);
+                }, result =>
+                {
+                    radioState = result.Item1;
+                    if (result.Item2 != null) list.ItemsSource = result.Item2;
+                    status.Text = result.Item3 ?? "";
+                }, () =>
+                {
+                    wifi.IsChecked = radioState == Wireless.WifiRadioState.On;
+                    setBusy(false);
+                });
             };
             connect.Click += (s, e) =>
             {
@@ -557,8 +597,9 @@ namespace WinNTDE
                 if (network == null) return;
                 RunWifiChange(() => Wireless.Disconnect(network), false, list, status, scan, setBusy);
             };
-            scan.Click += (s, e) => refresh(true);
-            refresh(false);
+            wifi.Click += (s, e) => refresh(wifi.IsChecked == true, wifi.IsChecked == true);
+            scan.Click += (s, e) => refresh(true, null);
+            refresh(false, null);
         }
 
         private void RunWifiChange(Action change, bool connecting, ListBox list, TextBlock status, Button scan, Action<bool> setBusy)

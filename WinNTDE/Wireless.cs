@@ -11,6 +11,12 @@ namespace WinNTDE
 {
     internal static class Wireless
     {
+        internal enum WifiRadioState { Unsupported, NoAdapter, HardwareOff, Off, On }
+
+        private const int RadioStateOpcode = 4;
+        private const uint RadioOn = 1, RadioOff = 2;
+        private const uint RadioPowerStateInvalid = 0x80342002;
+
         internal sealed class Network
         {
             internal Guid Adapter;
@@ -37,6 +43,12 @@ namespace WinNTDE
             internal Guid Id;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] internal string Description;
             internal int State;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PhyRadioState
+        {
+            internal uint Index, SoftwareState, HardwareState;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -90,31 +102,86 @@ namespace WinNTDE
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 248)] internal string Name;
         }
 
+        internal static WifiRadioState GetRadioState()
+        {
+            if (SystemSettings.WindowsVersion.Major < 6) return WifiRadioState.Unsupported;
+            return WithWlan(handle =>
+            {
+                var radios = ReadAdapters(handle).SelectMany(adapter => ReadAdapterRadios(handle, adapter.Id)).ToArray();
+                if (radios.Length == 0) return WifiRadioState.NoAdapter;
+                if (radios.All(radio => radio.HardwareState == RadioOff)) return WifiRadioState.HardwareOff;
+                return radios.Any(radio => radio.SoftwareState == RadioOn && radio.HardwareState != RadioOff) ?
+                    WifiRadioState.On : WifiRadioState.Off;
+            });
+        }
+
+        internal static void SetRadioEnabled(bool enabled)
+        {
+            WithWlan(handle =>
+            {
+                uint state = enabled ? RadioOn : RadioOff;
+                uint size = (uint)Marshal.SizeOf(typeof(PhyRadioState));
+                foreach (var adapter in ReadAdapters(handle))
+                {
+                    Guid id = adapter.Id;
+                    foreach (var current in ReadAdapterRadios(handle, id))
+                    {
+                        if (current.SoftwareState == state) continue;
+                        var radio = new PhyRadioState { Index = current.Index, SoftwareState = state };
+                        SystemSettings.Check(WlanSetInterface(handle, ref id, RadioStateOpcode, size, ref radio, IntPtr.Zero));
+                    }
+                }
+                return 0;
+            });
+        }
+
+        private static AdapterInfo[] ReadAdapters(IntPtr handle)
+        {
+            IntPtr list;
+            SystemSettings.Check(WlanEnumInterfaces(handle, IntPtr.Zero, out list));
+            try
+            {
+                var adapters = new AdapterInfo[Marshal.ReadInt32(list)];
+                int stride = Marshal.SizeOf(typeof(AdapterInfo));
+                for (int i = 0; i < adapters.Length; i++)
+                    adapters[i] = (AdapterInfo)Marshal.PtrToStructure(IntPtr.Add(list, 8 + i * stride), typeof(AdapterInfo));
+                return adapters;
+            }
+            finally { WlanFreeMemory(list); }
+        }
+
+        private static PhyRadioState[] ReadAdapterRadios(IntPtr handle, Guid id)
+        {
+            uint size;
+            IntPtr data;
+            SystemSettings.Check(WlanQueryInterface(handle, ref id, RadioStateOpcode, IntPtr.Zero, out size, out data, IntPtr.Zero));
+            try
+            {
+                int stride = Marshal.SizeOf(typeof(PhyRadioState));
+                int count = size >= sizeof(uint) ? Marshal.ReadInt32(data) : -1;
+                if (count < 0 || count > 64 || sizeof(uint) + count * stride > size)
+                    throw new InvalidOperationException("Windows returned an invalid Wi-Fi radio state.");
+                var radios = new PhyRadioState[count];
+                for (int i = 0; i < count; i++)
+                    radios[i] = (PhyRadioState)Marshal.PtrToStructure(IntPtr.Add(data, sizeof(uint) + i * stride), typeof(PhyRadioState));
+                return radios;
+            }
+            finally { WlanFreeMemory(data); }
+        }
+
         internal static Network[] Networks(bool scan)
         {
             return WithWlan(handle =>
             {
-                var adapters = new List<AdapterInfo>();
-                IntPtr list;
-                SystemSettings.Check(WlanEnumInterfaces(handle, IntPtr.Zero, out list));
-                try
-                {
-                    int count = Marshal.ReadInt32(list);
-                    int stride = Marshal.SizeOf(typeof(AdapterInfo));
-                    for (int i = 0; i < count; i++)
-                    {
-                        var adapter = (AdapterInfo)Marshal.PtrToStructure(IntPtr.Add(list, 8 + i * stride), typeof(AdapterInfo));
-                        adapters.Add(adapter);
-                    }
-                }
-                finally { WlanFreeMemory(list); }
-                if (adapters.Count == 0) return new Network[0];
+                var adapters = ReadAdapters(handle);
+                if (adapters.Length == 0) return new Network[0];
                 if (scan)
                 {
                     foreach (var adapter in adapters)
                     {
                         Guid id = adapter.Id;
-                        SystemSettings.Check(WlanScan(handle, ref id, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero));
+                        uint error = WlanScan(handle, ref id, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                        if (error != RadioPowerStateInvalid) SystemSettings.Check(error);
                     }
                     // Native Wi-Fi refreshes its scan cache asynchronously.
                     Thread.Sleep(2500);
@@ -124,7 +191,10 @@ namespace WinNTDE
                 {
                     Guid id = adapter.Id;
                     uint flags = SystemSettings.WindowsVersion.Major >= 6 ? 2u : 0;
-                    SystemSettings.Check(WlanGetAvailableNetworkList(handle, ref id, flags, IntPtr.Zero, out list));
+                    IntPtr list;
+                    uint error = WlanGetAvailableNetworkList(handle, ref id, flags, IntPtr.Zero, out list);
+                    if (error == RadioPowerStateInvalid) continue;
+                    SystemSettings.Check(error);
                     try
                     {
                         int count = Marshal.ReadInt32(list);
@@ -249,6 +319,10 @@ namespace WinNTDE
         [DllImport("wlanapi.dll")] private static extern uint WlanOpenHandle(uint version, IntPtr reserved, out uint negotiated, out IntPtr handle);
         [DllImport("wlanapi.dll")] private static extern uint WlanCloseHandle(IntPtr handle, IntPtr reserved);
         [DllImport("wlanapi.dll")] private static extern uint WlanEnumInterfaces(IntPtr handle, IntPtr reserved, out IntPtr list);
+        [DllImport("wlanapi.dll")] private static extern uint WlanQueryInterface(IntPtr handle, ref Guid id, int opcode,
+            IntPtr reserved, out uint size, out IntPtr data, IntPtr valueType);
+        [DllImport("wlanapi.dll")] private static extern uint WlanSetInterface(IntPtr handle, ref Guid id, int opcode,
+            uint size, ref PhyRadioState data, IntPtr reserved);
         [DllImport("wlanapi.dll")] private static extern uint WlanScan(IntPtr handle, ref Guid id, IntPtr ssid, IntPtr data, IntPtr reserved);
         [DllImport("wlanapi.dll")] private static extern uint WlanGetAvailableNetworkList(IntPtr handle, ref Guid id, uint flags,
             IntPtr reserved, out IntPtr list);
