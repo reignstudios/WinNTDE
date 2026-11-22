@@ -5,7 +5,7 @@
         ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
     <StackPanel Margin="24">
         <TextBlock Text="Activate WinNTDE?" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,10"/>
-        <TextBlock Text="Use WinNTDE instead of Windows Explorer for this account. Windows will restart when you activate."
+        <TextBlock Text="Set WinNTDE as the default Windows shell for this PC. Windows will restart when you activate."
                    TextWrapping="Wrap" Margin="0,0,0,12"/>
         <TextBlock x:Name="ShellPath" TextWrapping="Wrap"
                    Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" Margin="0,0,0,16"/>

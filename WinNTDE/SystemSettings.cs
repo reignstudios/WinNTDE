@@ -329,23 +329,34 @@ namespace WinNTDE
         private static void RestoreExplorerShell()
         {
             object userShell = ReadWinlogonShell(Registry.CurrentUser);
-            if (userShell != null)
-            {
-                if (!string.Equals(userShell as string, ExplorerExecutable, StringComparison.OrdinalIgnoreCase))
-                    WriteExplorerShell(Registry.CurrentUser);
-                return;
-            }
-
+            bool machineUsesWinNTDE;
             var view = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default;
             using (var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
             {
-                if (string.Equals(ReadWinlogonShell(machine) as string, ExplorerExecutable, StringComparison.OrdinalIgnoreCase)) return;
-                try { WriteExplorerShell(machine); }
-                catch (Exception error) when (error is UnauthorizedAccessException || error is SecurityException)
+                string machineShell = ReadWinlogonShell(machine) as string;
+                machineUsesWinNTDE = IsWinNTDEShell(machineShell);
+                if ((machineUsesWinNTDE || userShell == null) &&
+                    !string.Equals(machineShell, ExplorerExecutable, StringComparison.OrdinalIgnoreCase))
                 {
-                    RestoreMachineShellElevated();
+                    try { WriteExplorerShell(machine); }
+                    catch (Exception error) when (error is UnauthorizedAccessException || error is SecurityException)
+                    {
+                        RestoreMachineShellElevated();
+                    }
                 }
             }
+
+            if (userShell != null && (!machineUsesWinNTDE || IsWinNTDEShell(userShell as string)) &&
+                !string.Equals(userShell as string, ExplorerExecutable, StringComparison.OrdinalIgnoreCase))
+                WriteExplorerShell(Registry.CurrentUser);
+        }
+
+        private static bool IsWinNTDEShell(string command)
+        {
+            if (command == null) return false;
+            string executable = command.Trim().Trim('"');
+            return string.Equals(executable, "WinNTDE.exe", StringComparison.OrdinalIgnoreCase) ||
+                executable.EndsWith(@"\WinNTDE.exe", StringComparison.OrdinalIgnoreCase);
         }
 
         private static object ReadWinlogonShell(RegistryKey root)

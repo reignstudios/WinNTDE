@@ -31,13 +31,18 @@ namespace WinNTDE.Activator
             try
             {
                 ActivateShell(shellPath, RestartWindows);
-                Close();
             }
-            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException ||
-                error is SecurityException || error is Win32Exception || error is InvalidOperationException)
+            catch (Exception error) when (error is UnauthorizedAccessException || error is SecurityException)
+            {
+                ShowError("Administrator access is required to change the Windows shell.");
+                return;
+            }
+            catch (Exception error) when (error is IOException || error is Win32Exception || error is InvalidOperationException)
             {
                 ShowError(error.Message);
+                return;
             }
+            Close();
         }
 
         private void CancelClicked(object sender, RoutedEventArgs e)
@@ -56,7 +61,9 @@ namespace WinNTDE.Activator
             if (!File.Exists(executable)) throw new FileNotFoundException(MissingShell, executable);
 
             string command = "\"" + executable + "\"";
-            using (var key = Registry.CurrentUser.CreateSubKey(WinlogonKey))
+            var view = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default;
+            using (var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+            using (var key = machine.OpenSubKey(WinlogonKey, true))
             {
                 if (key == null) throw new InvalidOperationException("The Winlogon setting could not be opened.");
                 object previous = key.GetValue(ShellValue, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
