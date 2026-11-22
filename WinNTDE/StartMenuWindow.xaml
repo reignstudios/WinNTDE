@@ -23,7 +23,7 @@
             <Button Style="{StaticResource AppButton}" Margin="2" Padding="4" Click="OpenApp" ToolTip="{Binding Name}"
                     AutomationProperties.Name="{Binding Name}">
                 <Button.ContextMenu>
-                    <ContextMenu Style="{DynamicResource ShellMenu}" Opened="OpenPinMenu" Closed="ClosePinMenu">
+                    <ContextMenu Style="{DynamicResource ShellMenu}" Opened="OpenPinMenu" Closed="CloseMenu">
                         <MenuItem Header="Unpin from Start"/>
                     </ContextMenu>
                 </Button.ContextMenu>
@@ -37,7 +37,7 @@
             <Button Style="{StaticResource AppButton}" Padding="7,4" HorizontalContentAlignment="Stretch"
                     Click="OpenApp" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding Name}">
                 <Button.ContextMenu>
-                    <ContextMenu Style="{DynamicResource ShellMenu}" Opened="OpenPinMenu" Closed="ClosePinMenu">
+                    <ContextMenu Style="{DynamicResource ShellMenu}" Opened="OpenPinMenu" Closed="CloseMenu">
                         <MenuItem Header="Pin to Start"/>
                     </ContextMenu>
                 </Button.ContextMenu>
@@ -57,11 +57,11 @@
             <Border DockPanel.Dock="Bottom" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}"
                     BorderThickness="0,1,0,0" Padding="14,9,9,6">
                 <WrapPanel>
-                    <Button Style="{StaticResource QuickAction}" Content="File Explorer" Click="OpenExplorer"/>
                     <Button Style="{StaticResource QuickAction}" Content="Settings" Click="OpenSettings"/>
                     <Button Style="{StaticResource QuickAction}" Content="Run…" Click="RunCommand"/>
                     <Button Style="{StaticResource QuickAction}" Content="Task Manager" Click="OpenTaskManager"/>
                     <Button Style="{StaticResource QuickAction}" Content="Exit WinNTDE" Click="ExitDesktop"/>
+                    <Button Style="{StaticResource QuickAction}" Content="Power ▾" AutomationProperties.Name="Power" Click="OpenPowerMenu"/>
                 </WrapPanel>
             </Border>
             <StackPanel DockPanel.Dock="Top" Margin="15,13,15,6">

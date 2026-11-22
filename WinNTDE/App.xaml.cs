@@ -118,6 +118,12 @@ namespace WinNTDE
             menu.Items.Add(item);
         }
 
+        internal static void ConfirmPowerAction(Window owner, string label, Action action)
+        {
+            if (MessageBox.Show(owner, label + " now?", owner.Title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                DesktopFiles.Try(owner, action);
+        }
+
         internal void ExitDesktop(Window owner)
         {
             if (!IsShell || MessageBox.Show(owner, "Exit WinNTDE and close its windows?", "WinNTDE",

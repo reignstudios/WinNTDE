@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
 
@@ -19,7 +20,7 @@ namespace WinNTDE
         private string[] defaultPins = new string[0];
         private DateTime refreshAfter;
         private bool allApps, loading, loadFailed;
-        private ContextMenu pinMenu;
+        private ContextMenu openMenu;
 
         internal StartMenuWindow(App app, Action run)
         {
@@ -55,7 +56,7 @@ namespace WinNTDE
 
         internal void Dismiss()
         {
-            DismissPinMenu();
+            DismissMenu();
             if (IsVisible) Hide();
         }
 
@@ -63,7 +64,7 @@ namespace WinNTDE
         {
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
-                if (IsVisible && !IsActive && (pinMenu == null || !pinMenu.IsOpen)) Dismiss();
+                if (IsVisible && !IsActive && (openMenu == null || !openMenu.IsOpen)) Dismiss();
             }));
         }
 
@@ -142,7 +143,8 @@ namespace WinNTDE
         {
             if (e.Key == Key.Escape)
             {
-                Dismiss();
+                if (openMenu != null && openMenu.IsOpen) DismissMenu();
+                else Dismiss();
                 e.Handled = true;
             }
             else if (e.Key == Key.Down && SearchBox.IsKeyboardFocusWithin && AppList.IsVisible && AppList.Items.Count > 0)
@@ -180,22 +182,22 @@ namespace WinNTDE
             var target = menu.PlacementTarget as FrameworkElement;
             var entry = target == null ? null : target.DataContext as StartApp;
             if (entry == null) return;
-            pinMenu = menu;
+            openMenu = menu;
             bool pinned = CurrentPins.Contains(entry.Key, StringComparer.OrdinalIgnoreCase);
             menu.Items.Clear();
             App.AddMenuItem(menu, pinned ? "Unpin from Start" : "Pin to Start", () => TogglePin(entry));
         }
 
-        private void ClosePinMenu(object sender, RoutedEventArgs e)
+        private void CloseMenu(object sender, RoutedEventArgs e)
         {
-            if (!ReferenceEquals(pinMenu, sender)) return;
-            pinMenu = null;
+            if (!ReferenceEquals(openMenu, sender)) return;
+            openMenu = null;
             DismissWhenInactive();
         }
 
         private void TogglePin(StartApp entry)
         {
-            DismissPinMenu();
+            DismissMenu();
             var previous = app.Preferences.PinnedApps;
             var pins = CurrentPins.ToList();
             int index = pins.FindIndex(key => string.Equals(key, entry.Key, StringComparison.OrdinalIgnoreCase));
@@ -207,17 +209,34 @@ namespace WinNTDE
             if (PinnedView.Visibility == Visibility.Visible) UpdateView();
         }
 
-        private void DismissPinMenu()
+        private void DismissMenu()
         {
-            var menu = pinMenu;
-            pinMenu = null;
+            var menu = openMenu;
+            openMenu = null;
             if (menu != null) menu.IsOpen = false;
         }
 
-        private void OpenExplorer(object sender, RoutedEventArgs e)
+        private void OpenPowerMenu(object sender, RoutedEventArgs e)
         {
-            Dismiss();
-            app.OpenExplorer(DesktopFiles.Home);
+            DismissMenu();
+            var menu = App.Menu();
+            menu.PlacementTarget = (Button)sender;
+            menu.Placement = PlacementMode.Top;
+            menu.Closed += CloseMenu;
+            AddPowerAction(menu, "Shut down", () => SystemSettings.EndSession("s"));
+            AddPowerAction(menu, "Restart", () => SystemSettings.EndSession("r"));
+            AddPowerAction(menu, "Sleep", SystemSettings.Sleep);
+            openMenu = menu;
+            menu.IsOpen = true;
+        }
+
+        private void AddPowerAction(ContextMenu menu, string label, Action action)
+        {
+            App.AddMenuItem(menu, label, () =>
+            {
+                Dismiss();
+                App.ConfirmPowerAction(Owner ?? this, label, action);
+            });
         }
 
         private void OpenSettings(object sender, RoutedEventArgs e)

@@ -349,11 +349,8 @@ namespace WinNTDE
             foreach (var pair in new[] { new { Label = "Sleep", Option = "" }, new { Label = "Sign out", Option = "l" },
                 new { Label = "Restart", Option = "r" }, new { Label = "Shut down", Option = "s" } })
             {
-                actions.Children.Add(MakeButton(pair.Label, () =>
-                {
-                    if (MessageBox.Show(this, pair.Label + " now?", Title, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-                    DesktopFiles.Try(this, () => { if (pair.Option == "") SystemSettings.Sleep(); else SystemSettings.EndSession(pair.Option); });
-                }));
+                actions.Children.Add(MakeButton(pair.Label, () => App.ConfirmPowerAction(this, pair.Label,
+                    () => { if (pair.Option == "") SystemSettings.Sleep(); else SystemSettings.EndSession(pair.Option); })));
             }
         }
 
