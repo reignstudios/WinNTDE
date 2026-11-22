@@ -4,9 +4,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 16.0.37903.5
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinNTDE", "WinNTDE\WinNTDE.csproj", "{06688DBB-8777-472D-90A2-CA4A42C7A381}"
-	ProjectSection(ProjectDependencies) = postProject
-		{6EB0313F-373F-446A-8ED7-0325DE9E870A} = {6EB0313F-373F-446A-8ED7-0325DE9E870A}
-	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinNTDE.Activator", "WinNTDE.Activator\WinNTDE.Activator.csproj", "{6EB0313F-373F-446A-8ED7-0325DE9E870A}"
 EndProject
