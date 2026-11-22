@@ -18,6 +18,12 @@
             </StackPanel>
         </Border>
 
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <TextBlock Text="Search processes" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox x:Name="SearchBox" TextChanged="SearchChanged" Padding="6,4"
+                     AutomationProperties.Name="Search processes" ToolTip="Search by name or PID"/>
+        </DockPanel>
+
         <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
             <WrapPanel>
                 <Button x:Name="EndTaskButton" Content="End Task" IsEnabled="False" Click="EndSelected" Margin="0,0,6,0"/>
@@ -40,7 +46,17 @@
                                             AutomationProperties.Name="{Binding ExpanderName}" Click="ToggleGroup"
                                             Width="23" Height="22" MinHeight="0" Padding="0" Margin="0,0,6,0"/>
                                     <TextBlock Text="{Binding Name}" ToolTip="{Binding Executable}" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" Margin="0,3"/>
+                                               TextTrimming="CharacterEllipsis" Margin="0,3">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ContextOnly}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </DockPanel>
                             </DataTemplate>
                         </GridViewColumn.CellTemplate>

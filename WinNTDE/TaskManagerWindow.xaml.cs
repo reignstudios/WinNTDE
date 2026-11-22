@@ -39,9 +39,16 @@ namespace WinNTDE
 
         private void SelectionChanged(object sender, SelectionChangedEventArgs e) { UpdateButtons(); }
 
+        private void SearchChanged(object sender, TextChangedEventArgs e)
+        {
+            if (snapshot == null) return;
+            int matches = RenderRows();
+            if (!busy) Status.Text = FormatProcessCount(matches);
+        }
+
         private void EndSelected(object sender, RoutedEventArgs e)
         {
-            var targets = ProcessList.SelectedItems.Cast<Row>()
+            var targets = ProcessList.SelectedItems.Cast<Row>().Where(row => !row.ContextOnly)
                 .Select(row => new TaskManagerData.Target(row.Process, row.Group != null)).ToArray();
             if (targets.Any(target => target.Process.CanEnd)) Run(targets);
         }
@@ -49,7 +56,7 @@ namespace WinNTDE
         private void UpdateButtons()
         {
             RefreshButton.IsEnabled = !busy && AutoRefresh.IsChecked != true;
-            EndTaskButton.IsEnabled = !busy && ProcessList.SelectedItems.Cast<Row>().Any(row => row.Process.CanEnd);
+            EndTaskButton.IsEnabled = !busy && ProcessList.SelectedItems.Cast<Row>().Any(row => !row.ContextOnly && row.Process.CanEnd);
         }
 
         private void Run(TaskManagerData.Target[] targets = null)
@@ -73,15 +80,16 @@ namespace WinNTDE
                 {
                     if (closed) return;
                     busy = false;
+                    int matches = 0;
                     if (updated != null)
                     {
                         snapshot = updated;
                         expanded.IntersectWith(snapshot.Apps.Select(group => group.Owner.Identity));
                         CpuUsage.Text = updated.CpuPercent.HasValue ? updated.CpuPercent.Value + "%" : "Unavailable";
                         MemoryUsage.Text = FormatMemory(updated.UsedMemory, updated.TotalMemory);
-                        RenderRows();
+                        matches = RenderRows();
                     }
-                    Status.Text = message ?? FormatProcessCount(updated);
+                    Status.Text = message ?? FormatProcessCount(matches);
                     UpdateButtons();
                 }));
             });
@@ -95,9 +103,12 @@ namespace WinNTDE
                 string.Format("{0:0} / {1:0} MiB", used / MiB, total / MiB);
         }
 
-        private static string FormatProcessCount(TaskManagerData.Snapshot data)
+        private string FormatProcessCount(int matches)
         {
-            int count = data.Background.Length + data.Apps.Sum(group => 1 + group.Members.Count);
+            if (!string.IsNullOrWhiteSpace(SearchBox.Text))
+                return matches == 0 ? "No matching processes." : matches + (matches == 1 ? " matching process" : " matching processes");
+
+            int count = snapshot.Background.Length + snapshot.Apps.Sum(group => 1 + group.Members.Count);
             return count + (count == 1 ? " process" : " processes");
         }
 
@@ -111,33 +122,52 @@ namespace WinNTDE
             if (group != null) ProcessList.ScrollIntoView(group);
         }
 
-        private void RenderRows()
+        private int RenderRows()
         {
+            string query = SearchBox.Text.Trim();
+            bool filtering = query.Length != 0;
+            int pid;
+            if (!int.TryParse(query, out pid)) pid = -1;
             var selected = new HashSet<Tuple<int, long>>(ProcessList.SelectedItems.Cast<Row>().Select(row => row.Process.Identity));
             var rows = new List<Row>();
             foreach (var group in snapshot.Apps)
             {
-                bool open = expanded.Contains(group.Owner.Identity);
-                rows.Add(new Row(group.Owner, group, false, open));
-                if (open) rows.AddRange(group.Members.Select(process => new Row(process, null, true, false)));
+                bool ownerMatches = !filtering || Matches(group.Owner, query, pid);
+                var members = filtering ? group.Members.Where(process => Matches(process, query, pid)) : group.Members;
+                if (!ownerMatches && !members.Any()) continue;
+
+                bool open = filtering || expanded.Contains(group.Owner.Identity);
+                rows.Add(new Row(group.Owner, group, false, open, canExpand: !filtering, contextOnly: !ownerMatches));
+                if (open) rows.AddRange(members.Select(process => new Row(process, null, true, false)));
             }
-            rows.AddRange(snapshot.Background.Select(process => new Row(process, null, false, false)));
+            rows.AddRange(snapshot.Background.Where(process => !filtering || Matches(process, query, pid))
+                .Select(process => new Row(process, null, false, false)));
             ProcessList.ItemsSource = rows;
-            foreach (var row in rows.Where(row => selected.Contains(row.Process.Identity))) ProcessList.SelectedItems.Add(row);
+            foreach (var row in rows.Where(row => !row.ContextOnly && selected.Contains(row.Process.Identity))) ProcessList.SelectedItems.Add(row);
+            return rows.Count(row => !row.ContextOnly);
+        }
+
+        private static bool Matches(TaskManagerData.ProcessEntry process, string query, int pid)
+        {
+            return process.Id == pid || (process.Executable != null && process.Executable.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                (process.WindowTitle != null && process.WindowTitle.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0);
         }
 
         private sealed class Row
         {
             internal readonly TaskManagerData.ProcessEntry Process;
             internal readonly TaskManagerData.Group Group;
-            private readonly bool child, expanded;
+            private readonly bool child, expanded, canExpand;
 
-            internal Row(TaskManagerData.ProcessEntry process, TaskManagerData.Group group, bool child, bool expanded)
+            internal Row(TaskManagerData.ProcessEntry process, TaskManagerData.Group group, bool child, bool expanded,
+                bool canExpand = false, bool contextOnly = false)
             {
                 Process = process;
                 Group = group;
                 this.child = child;
                 this.expanded = expanded;
+                this.canExpand = canExpand;
+                ContextOnly = contextOnly;
             }
 
             public string Name { get { return Group == null ? Process.Executable : Process.WindowTitle; } }
@@ -146,7 +176,8 @@ namespace WinNTDE
             public Thickness Indent { get { return new Thickness(child ? 19 : 0, 0, 0, 0); } }
             public string Expander { get { return expanded ? "▾" : "▸"; } }
             public string ExpanderName { get { return (expanded ? "Collapse " : "Expand ") + Name; } }
-            public Visibility ExpanderVisibility { get { return Group != null && Group.Members.Count != 0 ? Visibility.Visible : Visibility.Hidden; } }
+            public bool ContextOnly { get; private set; }
+            public Visibility ExpanderVisibility { get { return canExpand && Group.Members.Count != 0 ? Visibility.Visible : Visibility.Hidden; } }
         }
     }
 }
