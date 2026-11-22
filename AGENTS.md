@@ -59,6 +59,7 @@
 - TaskManager is a WPF Window
 - Feature: CPU Usage as sinlge number from 0-100%
 - Feature: Ram Usage as single number from 0-TotalRam value
+- Feature: C drive disk usage only (don't monitor other drives)
 - Feature: Process list. Windowed processes are grouped under the window owner just like Win11 TaskManager does
 - Feature: Windowed processes can be expanded to show sub-processes
 - Feature: "End Task" button will force quit process or windowed process tree for selected items (multiple can be selected at once)

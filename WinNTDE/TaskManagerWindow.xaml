@@ -6,16 +6,28 @@
     <DockPanel Margin="14">
         <Border DockPanel.Dock="Top" Margin="0,0,0,12" Padding="14,9"
                 Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="4">
-            <StackPanel Orientation="Horizontal">
-                <StackPanel MinWidth="153" Margin="0,0,16,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition Width="1.4*"/>
+                    <ColumnDefinition/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
                     <TextBlock Text="CPU usage" Foreground="{DynamicResource Muted}"/>
                     <TextBlock x:Name="CpuUsage" Text="—" FontSize="23" FontWeight="SemiBold" AutomationProperties.Name="CPU usage"/>
                 </StackPanel>
-                <StackPanel>
+                <StackPanel Grid.Column="1" Margin="0,0,16,0">
                     <TextBlock Text="RAM usage" Foreground="{DynamicResource Muted}"/>
-                    <TextBlock x:Name="MemoryUsage" Text="—" FontSize="23" FontWeight="SemiBold" AutomationProperties.Name="RAM usage"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="MemoryUsage" Text="—" FontSize="23" FontWeight="SemiBold" AutomationProperties.Name="RAM usage"/>
+                        <TextBlock x:Name="MemoryTotal" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/>
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="C: disk activity" Foreground="{DynamicResource Muted}"/>
+                    <TextBlock x:Name="DiskUsage" Text="—" FontSize="23" FontWeight="SemiBold" AutomationProperties.Name="C: disk activity"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">

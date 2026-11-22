@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Threading;
 
 namespace WinNTDE
@@ -45,8 +47,8 @@ namespace WinNTDE
 
         internal sealed class Snapshot
         {
-            internal int? CpuPercent;
-            internal ulong TotalMemory, UsedMemory;
+            internal int? CpuPercent, MemoryPercent, DiskActivePercent;
+            internal ulong TotalMemory;
             internal Group[] Apps;
             internal ProcessEntry[] Background;
         }
@@ -65,35 +67,65 @@ namespace WinNTDE
 
         internal static Snapshot Capture()
         {
-            long idleStart, kernelStart, userStart;
-            bool cpuAvailable = GetSystemTimes(out idleStart, out kernelStart, out userStart);
-            var sample = Stopwatch.StartNew();
-            var entries = ReadProcesses();
-            var groups = GroupProcesses(entries, entries.Values.Where(process => process.WindowTitle != null).Select(process => process.Id));
-            var memory = new MemoryStatus { Size = (uint)Marshal.SizeOf(typeof(MemoryStatus)) };
-            bool memoryAvailable = GlobalMemoryStatusEx(ref memory);
-            int remaining = 250 - (int)sample.ElapsedMilliseconds;
-            if (cpuAvailable && remaining > 0) Thread.Sleep(remaining);
-
-            int? cpu = null;
-            long idleEnd, kernelEnd, userEnd;
-            if (cpuAvailable && GetSystemTimes(out idleEnd, out kernelEnd, out userEnd))
+            using (var disk = new PerformanceCounter { CategoryName = "LogicalDisk", CounterName = "% Idle Time", InstanceName = "C:" })
             {
-                long total = kernelEnd - kernelStart + userEnd - userStart;
-                if (total > 0) cpu = (int)Math.Round(Math.Max(0, Math.Min(100, 100.0 * (total - (idleEnd - idleStart)) / total)));
+                var diskStart = ReadDiskSample(disk);
+                long idleStart, kernelStart, userStart;
+                bool cpuAvailable = GetSystemTimes(out idleStart, out kernelStart, out userStart);
+                var sample = Stopwatch.StartNew();
+                var entries = ReadProcesses();
+                var groups = GroupProcesses(entries, entries.Values.Where(process => process.WindowTitle != null).Select(process => process.Id));
+                var memory = new MemoryStatus { Size = (uint)Marshal.SizeOf(typeof(MemoryStatus)) };
+                bool memoryAvailable = GlobalMemoryStatusEx(ref memory) && memory.TotalPhysical != 0;
+                int remaining = 250 - (int)sample.ElapsedMilliseconds;
+                if ((cpuAvailable || diskStart.HasValue) && remaining > 0) Thread.Sleep(remaining);
+
+                int? cpu = null;
+                long idleEnd, kernelEnd, userEnd;
+                if (cpuAvailable && GetSystemTimes(out idleEnd, out kernelEnd, out userEnd))
+                {
+                    long total = kernelEnd - kernelStart + userEnd - userStart;
+                    if (total > 0) cpu = RoundPercent(100.0 * (total - (idleEnd - idleStart)) / total);
+                }
+
+                var appMembers = new HashSet<int>(groups.Values.SelectMany(group => group.Members.Select(member => member.Id)));
+                return new Snapshot
+                {
+                    CpuPercent = cpu,
+                    MemoryPercent = memoryAvailable ? (int?)memory.Load : null,
+                    TotalMemory = memoryAvailable ? memory.TotalPhysical : 0,
+                    DiskActivePercent = ReadDiskActivity(disk, diskStart),
+                    Apps = groups.Values.OrderBy(group => group.Owner.WindowTitle, StringComparer.CurrentCultureIgnoreCase)
+                        .ThenBy(group => group.Owner.Id).ToArray(),
+                    Background = entries.Values.Where(process => !groups.ContainsKey(process.Id) && !appMembers.Contains(process.Id))
+                        .OrderBy(process => process.Executable, StringComparer.CurrentCultureIgnoreCase).ThenBy(process => process.Id).ToArray()
+                };
             }
+        }
 
-            var appMembers = new HashSet<int>(groups.Values.SelectMany(group => group.Members.Select(member => member.Id)));
-            return new Snapshot
+        private static CounterSample? ReadDiskSample(PerformanceCounter disk)
+        {
+            try { return disk.NextSample(); }
+            catch (Exception error) when (error is InvalidOperationException || error is Win32Exception ||
+                error is IOException || error is UnauthorizedAccessException || error is SecurityException)
             {
-                CpuPercent = cpu,
-                TotalMemory = memoryAvailable ? memory.TotalPhysical : 0,
-                UsedMemory = memoryAvailable ? memory.TotalPhysical - Math.Min(memory.TotalPhysical, memory.AvailablePhysical) : 0,
-                Apps = groups.Values.OrderBy(group => group.Owner.WindowTitle, StringComparer.CurrentCultureIgnoreCase)
-                    .ThenBy(group => group.Owner.Id).ToArray(),
-                Background = entries.Values.Where(process => !groups.ContainsKey(process.Id) && !appMembers.Contains(process.Id))
-                    .OrderBy(process => process.Executable, StringComparer.CurrentCultureIgnoreCase).ThenBy(process => process.Id).ToArray()
-            };
+                return null;
+            }
+        }
+
+        private static int? ReadDiskActivity(PerformanceCounter disk, CounterSample? start)
+        {
+            if (!start.HasValue) return null;
+            var end = ReadDiskSample(disk);
+            if (!end.HasValue || end.Value.BaseValue <= start.Value.BaseValue || end.Value.RawValue < start.Value.RawValue)
+                return null;
+
+            return RoundPercent(100 - CounterSample.Calculate(start.Value, end.Value));
+        }
+
+        private static int RoundPercent(double value)
+        {
+            return (int)Math.Round(Math.Max(0, Math.Min(100, value)));
         }
 
         internal static string EndTasks(Target[] targets)

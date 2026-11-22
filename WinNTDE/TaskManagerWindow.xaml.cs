@@ -85,8 +85,10 @@ namespace WinNTDE
                     {
                         snapshot = updated;
                         expanded.IntersectWith(snapshot.Apps.Select(group => group.Owner.Identity));
-                        CpuUsage.Text = updated.CpuPercent.HasValue ? updated.CpuPercent.Value + "%" : "Unavailable";
-                        MemoryUsage.Text = FormatMemory(updated.UsedMemory, updated.TotalMemory);
+                        CpuUsage.Text = FormatPercent(updated.CpuPercent);
+                        MemoryUsage.Text = FormatPercent(updated.MemoryPercent);
+                        MemoryTotal.Text = FormatMemoryTotal(updated.TotalMemory);
+                        DiskUsage.Text = FormatPercent(updated.DiskActivePercent);
                         matches = RenderRows();
                     }
                     Status.Text = message ?? FormatProcessCount(matches);
@@ -95,12 +97,16 @@ namespace WinNTDE
             });
         }
 
-        private static string FormatMemory(ulong used, ulong total)
+        private static string FormatPercent(int? percent)
         {
-            if (total == 0) return "Unavailable";
+            return percent.HasValue ? percent.Value + "%" : "Unavailable";
+        }
+
+        private static string FormatMemoryTotal(ulong total)
+        {
+            if (total == 0) return string.Empty;
             const double MiB = 1024 * 1024, GiB = MiB * 1024;
-            return total >= GiB ? string.Format("{0:0.#} / {1:0.#} GiB", used / GiB, total / GiB) :
-                string.Format("{0:0} / {1:0} MiB", used / MiB, total / MiB);
+            return total >= GiB ? string.Format("{0:0.#} GiB total", total / GiB) : string.Format("{0:0} MiB total", total / MiB);
         }
 
         private string FormatProcessCount(int matches)
