@@ -1,4 +1,6 @@
 using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -12,6 +14,7 @@ namespace WinNTDE
         private bool ownsInstance;
         private SettingsWindow settings;
         private TaskManagerWindow taskManager;
+        private TaskbarWindow taskbar;
         private ResourceDictionary darkControls;
 
         internal ShellPreferences Preferences { get; private set; }
@@ -33,18 +36,23 @@ namespace WinNTDE
                 return;
             }
 
-            IsShell = NativeDesktop.FindWindow("Shell_TrayWnd", null) == IntPtr.Zero &&
-                NativeDesktop.GetShellWindow() == IntPtr.Zero;
             Preferences = new ShellPreferences();
             ApplyTheme();
-            var desktop = new MainWindow(this);
-            MainWindow = desktop;
-            desktop.Show();
-            new TaskbarWindow(this).Show();
+            ShowDesktop();
             if (e.Args.Length == 0) return;
             if (string.Equals(e.Args[0], "--settings", StringComparison.OrdinalIgnoreCase)) OpenSettings();
             else if (e.Args.Length == 2 && string.Equals(e.Args[0], "--explore", StringComparison.OrdinalIgnoreCase))
                 OpenExplorer(e.Args[1]);
+        }
+
+        private void ShowDesktop()
+        {
+            IsShell = NativeDesktop.FindWindow("Shell_TrayWnd", null) == IntPtr.Zero &&
+                NativeDesktop.GetShellWindow() == IntPtr.Zero;
+            MainWindow = new MainWindow(this);
+            MainWindow.Show();
+            taskbar = new TaskbarWindow(this);
+            taskbar.Show();
         }
 
         internal void ApplyTheme()
@@ -139,9 +147,37 @@ namespace WinNTDE
 
         internal void ExitDesktop(Window owner)
         {
-            if (!IsShell || MessageBox.Show(owner, "Exit WinNTDE and close its windows?", "WinNTDE",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-                Shutdown();
+            if (MessageBox.Show(owner, "Exit WinNTDE and return to Windows Explorer?", "Exit WinNTDE",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+
+            ProcessStartInfo explorer = null;
+            if (!DesktopFiles.Try(owner, () =>
+            {
+                if (SystemSettings.IsExplorerRunning()) return;
+                var startInfo = SystemSettings.PrepareExplorerShell();
+                if (!SystemSettings.IsExplorerRunning()) explorer = startInfo;
+            })) return;
+
+            if (explorer != null)
+            {
+                // Release the tray registration and desktop window before Explorer claims the shell.
+                taskbar.Close();
+                MainWindow.Close();
+                try
+                {
+                    using (var process = Process.Start(explorer))
+                        if (process == null) throw new InvalidOperationException("Windows Explorer did not start.");
+                }
+                catch (Exception error) when (error is Win32Exception || error is InvalidOperationException)
+                {
+                    ShowDesktop();
+                    MessageBox.Show(taskbar, "Could not start Windows Explorer. " + error.Message, "Exit WinNTDE",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+            }
+
+            Shutdown();
         }
 
         protected override void OnExit(ExitEventArgs e)

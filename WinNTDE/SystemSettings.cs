@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
@@ -15,6 +16,8 @@ namespace WinNTDE
     {
         internal static readonly Version WindowsVersion = Environment.OSVersion.Version;
         private const int DmOrientation = 0x80, DmWidth = 0x80000, DmHeight = 0x100000;
+        private const string WinlogonKey = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+        private const string ExplorerExecutable = "explorer.exe";
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         internal struct DisplayMode
@@ -301,6 +304,81 @@ namespace WinNTDE
                 StartTerminal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), elevated);
             }
             catch (Win32Exception error) when (error.NativeErrorCode == Cancelled) { }
+        }
+
+        internal static bool IsExplorerRunning()
+        {
+            int sessionId;
+            using (var current = Process.GetCurrentProcess()) sessionId = current.SessionId;
+            var explorers = Process.GetProcessesByName("explorer");
+            try { return explorers.Any(process => process.SessionId == sessionId); }
+            finally { foreach (var process in explorers) process.Dispose(); }
+        }
+
+        internal static ProcessStartInfo PrepareExplorerShell()
+        {
+            string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            string executable = Path.Combine(windows, ExplorerExecutable);
+            if (string.IsNullOrEmpty(windows) || !File.Exists(executable))
+                throw new FileNotFoundException("Windows Explorer could not be found.", executable);
+
+            RestoreExplorerShell();
+            return new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = windows };
+        }
+
+        private static void RestoreExplorerShell()
+        {
+            object userShell = ReadWinlogonShell(Registry.CurrentUser);
+            if (userShell != null)
+            {
+                if (!string.Equals(userShell as string, ExplorerExecutable, StringComparison.OrdinalIgnoreCase))
+                    WriteExplorerShell(Registry.CurrentUser);
+                return;
+            }
+
+            var view = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default;
+            using (var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+            {
+                if (string.Equals(ReadWinlogonShell(machine) as string, ExplorerExecutable, StringComparison.OrdinalIgnoreCase)) return;
+                try { WriteExplorerShell(machine); }
+                catch (Exception error) when (error is UnauthorizedAccessException || error is SecurityException)
+                {
+                    RestoreMachineShellElevated();
+                }
+            }
+        }
+
+        private static object ReadWinlogonShell(RegistryKey root)
+        {
+            using (var key = root.OpenSubKey(WinlogonKey))
+                return key == null ? null : key.GetValue("Shell", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        }
+
+        private static void WriteExplorerShell(RegistryKey root)
+        {
+            using (var key = root.OpenSubKey(WinlogonKey, true))
+            {
+                if (key == null) throw new InvalidOperationException("The Winlogon registry key could not be opened.");
+                key.SetValue("Shell", ExplorerExecutable, RegistryValueKind.String);
+            }
+        }
+
+        private static void RestoreMachineShellElevated()
+        {
+            string arguments = "add \"HKLM\\" + WinlogonKey + "\" /v Shell /t REG_SZ /d " + ExplorerExecutable + " /f";
+            if (Environment.Is64BitOperatingSystem && !Environment.Is64BitProcess) arguments += " /reg:64";
+            var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "reg.exe"), arguments)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            using (var process = Process.Start(start))
+            {
+                if (process == null) throw new InvalidOperationException("The registry update could not be started.");
+                process.WaitForExit();
+                if (process.ExitCode != 0) throw new InvalidOperationException("The Windows Explorer shell setting could not be restored.");
+            }
         }
 
         private static void StartTerminal(string executable, bool elevated)

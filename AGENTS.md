@@ -22,6 +22,7 @@
 - Feature: Pinned app icons similar to Win11
 - Feature: App search bar to search apps by name
 - Feature: Button to view a list of all apps
+- Feature: "Exit WinNTDE" button asks user to confirm, checks if explorer.exe is running. If it is, just exit. If not change registry "Winlogon" key to be explorer.exe and launch it
 
 # WinNTDE File Explorer Window
 - File-Explorer is a WPF Window
