@@ -67,3 +67,8 @@
 - Feature: "Refresh" button lets user manually refresh the process list if auto-refresh is off.
 - Feature: Auto-Refresh is off by default but when Window opens it refreshes once.
 - Feature: If Auto-Refresh is on, it refreshes every 5 seconds.
+
+# WinNTDE.Activator
+- WPF C# app to let users activate WinNTDE as the explorer.exe replacement
+- Feature: A single window which asks the user if they would like to activate WinNTDE
+- Feature: If they activate, Winlogon reg key is changed to the fully path of where WinNTDE.exe is lives which sits next to WinNTDE.Activator.exe

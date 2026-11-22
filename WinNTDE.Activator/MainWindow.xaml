@@ -1,0 +1,19 @@
+﻿<Window x:Class="WinNTDE.Activator.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WinNTDE Activator" Width="460" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
+    <StackPanel Margin="24">
+        <TextBlock Text="Activate WinNTDE?" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,10"/>
+        <TextBlock Text="Use WinNTDE instead of Windows Explorer for this account. Windows will restart when you activate."
+                   TextWrapping="Wrap" Margin="0,0,0,12"/>
+        <TextBlock x:Name="ShellPath" TextWrapping="Wrap"
+                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" Margin="0,0,0,16"/>
+        <TextBlock x:Name="Status" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,12"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="ActivateButton" Content="Activate and restart" Padding="12,5"
+                    Click="ActivateClicked" Margin="0,0,8,0"/>
+            <Button Content="Cancel" Padding="12,5" IsCancel="True" Click="CancelClicked"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
