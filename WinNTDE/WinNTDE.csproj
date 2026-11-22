@@ -73,7 +73,6 @@
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Core" />
     <Reference Include="System.Management" />
-    <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Xaml">
@@ -130,7 +129,6 @@
     <Compile Include="ShellKeyHook.cs" />
     <Compile Include="ShellPreferences.cs" />
     <Compile Include="StartAppCatalog.cs" />
-    <Compile Include="StoreAppSupport.cs" />
     <Compile Include="StartMenuWindow.xaml.cs">
       <DependentUpon>StartMenuWindow.xaml</DependentUpon>
     </Compile>
