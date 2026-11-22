@@ -64,23 +64,66 @@ namespace WinNTDE.Activator
             var view = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default;
             using (var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
             using (var key = machine.OpenSubKey(WinlogonKey, true))
+            using (var user = Registry.CurrentUser.OpenSubKey(WinlogonKey, true))
             {
                 if (key == null) throw new InvalidOperationException("The Winlogon setting could not be opened.");
-                object previous = key.GetValue(ShellValue, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
-                var previousKind = previous == null ? RegistryValueKind.Unknown : key.GetValueKind(ShellValue);
-                key.SetValue(ShellValue, command, RegistryValueKind.String);
-
-                try { restart(); }
-                catch
-                {
-                    if (Equals(key.GetValue(ShellValue), command))
-                    {
-                        if (previous == null) key.DeleteValue(ShellValue, false);
-                        else key.SetValue(ShellValue, previous, previousKind);
-                    }
-                    throw;
-                }
+                SetShellAndRestart(key, user, command, restart);
             }
+        }
+
+        private static void SetShellAndRestart(RegistryKey machine, RegistryKey user, string command, Action restart)
+        {
+            object previousUserShell = ReadShell(user);
+            if (previousUserShell != null && !IsLegacyUserShell(previousUserShell as string))
+                throw new InvalidOperationException("This account already has a custom Windows shell. Clear that per-user setting before activating WinNTDE.");
+
+            object previousMachineShell = ReadShell(machine);
+            var previousMachineKind = previousMachineShell == null ? RegistryValueKind.Unknown : machine.GetValueKind(ShellValue);
+            var previousUserKind = previousUserShell == null ? RegistryValueKind.Unknown : user.GetValueKind(ShellValue);
+            bool userShellRemoved = false;
+            machine.SetValue(ShellValue, command, RegistryValueKind.String);
+            try
+            {
+                if (!Equals(ReadShell(user), previousUserShell))
+                    throw new InvalidOperationException("The per-user Windows shell changed during activation. Try again.");
+                if (previousUserShell != null)
+                {
+                    user.DeleteValue(ShellValue, false);
+                    userShellRemoved = true;
+                }
+                restart();
+            }
+            catch
+            {
+                try
+                {
+                    if (Equals(ReadShell(machine), command))
+                    {
+                        if (previousMachineShell == null) machine.DeleteValue(ShellValue, false);
+                        else machine.SetValue(ShellValue, previousMachineShell, previousMachineKind);
+                    }
+                }
+                finally
+                {
+                    if (userShellRemoved && ReadShell(user) == null)
+                        user.SetValue(ShellValue, previousUserShell, previousUserKind);
+                }
+                throw;
+            }
+        }
+
+        private static object ReadShell(RegistryKey key)
+        {
+            return key == null ? null : key.GetValue(ShellValue, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        }
+
+        private static bool IsLegacyUserShell(string command)
+        {
+            if (command == null) return false;
+            string executable = command.Trim().Trim('"');
+            return executable.Length == 0 || string.Equals(executable, "explorer.exe", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(executable, "WinNTDE.exe", StringComparison.OrdinalIgnoreCase) ||
+                executable.EndsWith(@"\WinNTDE.exe", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void RestartWindows()
