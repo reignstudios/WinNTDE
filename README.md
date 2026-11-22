@@ -13,3 +13,6 @@
 * Minimalist design users
 * Max performance users
 * Ideal for Mini or Stick PCs
+
+### Notes
+* Windows Store (WinRT) apps will not run in this environment
