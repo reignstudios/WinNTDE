@@ -30,7 +30,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.0.0.0</ApplicationVersion>
+    <ApplicationVersion>1.0.0.1</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -115,6 +115,7 @@
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
     <None Include="app.manifest" />
+    <None Include="ClickOnceLauncher.cs" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -142,4 +143,19 @@
     </BootstrapperPackage>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Keep the elevated Activator in the application folder as a file the launcher can open. -->
+  <Target Name="PrepareClickOnceLauncher" BeforeTargets="_DeploymentComputeClickOnceManifestInfo" Condition="'$(GenerateClickOnceManifests)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_ClickOnceLauncherPath>$(IntermediateOutputPath)WinNTDE.Activator.Launcher.exe</_ClickOnceLauncherPath>
+    </PropertyGroup>
+    <Csc Sources="ClickOnceLauncher.cs" OutputAssembly="$(_ClickOnceLauncherPath)" References="@(ReferencePath)" NoStandardLib="$(NoCompilerStandardLib)" NoConfig="true" NoWin32Manifest="true" Win32Icon="$(ApplicationIcon)" TargetType="winexe" Platform="$(PlatformTarget)" SubsystemVersion="$(SubsystemVersion)" Optimize="$(Optimize)" Deterministic="$(Deterministic)" ToolPath="$(CscToolPath)" ToolExe="$(CscToolExe)" />
+    <ItemGroup>
+      <_ClickOnceFiles Include="@(_DeploymentManifestEntryPoint)" />
+      <_DeploymentManifestEntryPoint Remove="@(_DeploymentManifestEntryPoint)" />
+      <_DeploymentManifestEntryPoint Include="$(_ClickOnceLauncherPath)">
+        <TargetPath>WinNTDE.Activator.Launcher.exe</TargetPath>
+      </_DeploymentManifestEntryPoint>
+      <FileWrites Include="$(_ClickOnceLauncherPath)" />
+    </ItemGroup>
+  </Target>
 </Project>
