@@ -16,6 +16,9 @@ namespace WinNTDE
         private static readonly Guid EnumeratorClass = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
         private static readonly Guid PolicyClass = new Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9");
         private static readonly Guid VistaPolicyClass = new Guid("294935CE-F637-4E7C-A41B-AB255460B862");
+        private const int DefaultBeep = ('D' << 8) | 'S'; // SND_ALIAS_SYSTEMDEFAULT
+        private const uint SoundAsync = 0x0001, SoundNoDefault = 0x0002;
+        private const uint SoundAliasId = 0x00110000, SoundSystem = 0x00200000;
 
         internal static Device[] GetDevices(bool input)
         {
@@ -106,13 +109,29 @@ namespace WinNTDE
 
         internal static void SetVolume(float level)
         {
-            if (SystemSettings.WindowsVersion.Major < 6) LegacyVolume.ReadOrUpdate(current => level);
-            else WithDefaultVolume(volume => volume.SetMasterVolumeLevelScalar(level, IntPtr.Zero));
+            ChangeVolume(current => level);
         }
 
         internal static float AdjustVolume(int percentagePoints)
         {
-            return UpdateVolume(current => OffsetVolume(current, percentagePoints));
+            return ChangeVolume(current => OffsetVolume(current, percentagePoints));
+        }
+
+        private static float ChangeVolume(Func<float, float> change)
+        {
+            float previous = 0;
+            float level = UpdateVolume(current =>
+            {
+                previous = current;
+                return change(current);
+            });
+            if (level != previous)
+            {
+                uint flags = SoundAliasId | SoundAsync | SoundNoDefault;
+                if (SystemSettings.WindowsVersion.Major >= 6) flags |= SoundSystem;
+                PlaySoundW(new IntPtr(DefaultBeep), IntPtr.Zero, flags);
+            }
+            return level;
         }
 
         private static float OffsetVolume(float current, int percentagePoints)
@@ -147,6 +166,8 @@ namespace WinNTDE
         }
 
         [DllImport("ole32.dll")] private static extern int PropVariantClear(ref Variant variant);
+        [DllImport("winmm.dll", ExactSpelling = true)]
+        private static extern bool PlaySoundW(IntPtr sound, IntPtr module, uint flags);
 
         [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         private interface IEndpointEnumerator

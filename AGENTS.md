@@ -52,3 +52,4 @@
 - Volume WPF Window pops open when you hit volume up/down buttons
 - Volume Window has a bar showing volume level when changed
 - Volume Window closes 3 seconds after it shows you volume level
+- When volume is changed, system volume beep is played
