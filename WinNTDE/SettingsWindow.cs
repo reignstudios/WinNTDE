@@ -290,6 +290,22 @@ namespace WinNTDE
                     }
                 }));
             });
+
+            var hdr = AddActions();
+            hdr.Margin = new Thickness(0, 8, 0, 0);
+            hdr.IsEnabled = SystemSettings.WindowsVersion.Major >= 10;
+            hdr.Children.Add(MakeButton("Auto HDR Calibrate", () => DesktopFiles.Try(this, () =>
+            {
+                string directory = AppDomain.CurrentDomain.BaseDirectory;
+                var start = new ProcessStartInfo(Path.Combine(directory, "AutoHDR.exe"))
+                {
+                    UseShellExecute = true,
+                    WorkingDirectory = directory
+                };
+                using (Process.Start(start)) { }
+            })));
+            hdr.Children.Add(MakeButton("HDR Enable", () => DesktopFiles.Try(this, () => HDR.SetHdr(true))));
+            hdr.Children.Add(MakeButton("HDR Disable", () => DesktopFiles.Try(this, () => HDR.SetHdr(false))));
         }
 
         private bool ConfirmDisplay()
