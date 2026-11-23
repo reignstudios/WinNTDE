@@ -15,3 +15,5 @@
 
 ### Notes
 * Windows Store (WinRT) apps will not run in this environment
+
+<img src="./Screenshots/Desktop.jpg" alt="Diagram" width="1024" />
