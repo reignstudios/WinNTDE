@@ -11,7 +11,7 @@
 * Making low-memory or slow PCs feel fast or usable again
 * Minimalist design users
 * Max performance users
-* Ideal for Mini or Stick PCs
+* Ideal for Fanless / Mini / Stick PCs or Servers
 
 ### Notes
 * Windows Store (WinRT) apps will not run in this environment
